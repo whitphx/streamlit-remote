@@ -1,0 +1,25 @@
+[project]
+name = "streamlit-remote"
+version = "0.1.0"
+description = "Run Streamlit apps with optional remote HTTPS access."
+readme = "README.md"
+authors = [
+    { name = "Yuichiro Tachibana (Tsuchiya)", email = "t.yic.yt@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.28",
+]
+
+[project.scripts]
+st-remote = "streamlit_remote.cli:main"
+streamlit-remote = "streamlit_remote.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.8,<0.12.0"]
+build-backend = "uv_build"
