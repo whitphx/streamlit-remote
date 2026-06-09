@@ -147,6 +147,184 @@ def test_run_cli_dry_run_prints_ngrok_off_log_command(
     assert "ngrok http http://localhost:8501 --log false" in captured.out
 
 
+def test_run_cli_dry_run_prints_ngrok_oauth_policy_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "ngrok",
+            "--remote-auth",
+            "oauth",
+            "--oauth-provider",
+            "github",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "ngrok http http://localhost:8501" in captured.out
+    assert "--traffic-policy-file '<generated-ngrok-github-oauth-policy.yml>'" in captured.out
+
+
+def test_run_cli_dry_run_defaults_ngrok_oauth_provider_to_google(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "ngrok",
+            "--remote-auth",
+            "oauth",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "--traffic-policy-file '<generated-ngrok-google-oauth-policy.yml>'" in captured.out
+
+
+def test_run_cli_rejects_oauth_provider_without_remote_auth(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--oauth-provider",
+            "github",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "`--oauth-provider` can only be used with `--remote-auth oauth`" in (
+        capsys.readouterr().err
+    )
+
+
+def test_run_cli_dry_run_prints_ngrok_custom_policy_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    policy_path = tmp_path / "policy.yml"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    policy_path.write_text("on_http_request: []\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "ngrok",
+            "--ngrok-traffic-policy-file",
+            str(policy_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"--traffic-policy-file {policy_path}" in captured.out
+
+
+def test_run_cli_rejects_remote_auth_with_cloudflare(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--remote-auth", "oauth"])
+
+    assert exit_code == 2
+    assert "supported only with `--provider ngrok`" in capsys.readouterr().err
+
+
+def test_run_cli_rejects_remote_auth_without_remote(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--remote-auth",
+            "oauth",
+            "--no-remote",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "`--remote-auth` requires remote access" in capsys.readouterr().err
+
+
+def test_run_cli_rejects_custom_policy_with_generated_auth(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    policy_path = tmp_path / "policy.yml"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    policy_path.write_text("on_http_request: []\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--remote-auth",
+            "oauth",
+            "--ngrok-traffic-policy-file",
+            str(policy_path),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "cannot be combined with `--remote-auth`" in capsys.readouterr().err
+
+
+def test_run_cli_rejects_missing_custom_policy_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--ngrok-traffic-policy-file",
+            str(tmp_path / "missing.yml"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "ngrok Traffic Policy file not found" in capsys.readouterr().err
+
+
 def test_run_cli_dry_run_prints_cloudflare_self_signed_origin_flag(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -219,6 +397,7 @@ class UnavailableProvider:
         *,
         origin_tls_verify: bool = True,
         tunnel_log_level: str = "info",
+        traffic_policy_file: Path | None = None,
     ) -> list[str]:
         return ["cloudflared", "tunnel", "--url", local_url]
 

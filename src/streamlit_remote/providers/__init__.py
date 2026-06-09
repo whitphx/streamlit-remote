@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal, Protocol
 
 from streamlit_remote.providers.cloudflare import CloudflareQuickTunnelProvider
@@ -20,6 +21,7 @@ class TunnelProvider(Protocol):
         *,
         origin_tls_verify: bool = True,
         tunnel_log_level: TunnelLogLevel = "info",
+        traffic_policy_file: Path | None = None,
     ) -> list[str]: ...
 
     def parse_public_url(self, line: str) -> str | None: ...
