@@ -11,9 +11,7 @@ from streamlit_remote.https import HttpsMaterial
 
 
 def test_parse_args_accepts_streamlit_args_after_separator() -> None:
-    namespace = cli.parse_args(
-        ["app.py", "--port", "9000", "--", "--server.headless", "true"]
-    )
+    namespace = cli.parse_args(["app.py", "--port", "9000", "--", "--server.headless", "true"])
 
     assert namespace.app == Path("app.py")
     assert namespace.port == 9000
@@ -346,9 +344,7 @@ def test_run_cli_dry_run_prints_mkcert_https_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli(
-        [str(app_path), "--dry-run", "--https", "mkcert", "--no-remote"]
-    )
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--https", "mkcert", "--no-remote"])
 
     captured = capsys.readouterr()
     assert exit_code == 0

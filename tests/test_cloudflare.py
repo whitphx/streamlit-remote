@@ -38,7 +38,11 @@ def test_parse_trycloudflare_url_from_representative_log_line() -> None:
 def test_parse_trycloudflare_url_from_noisy_log_line() -> None:
     provider = CloudflareQuickTunnelProvider()
 
-    line = "2026-06-09T12:00:00Z INF +--------------------------------------------------------------------------------------------+ https://demo.trycloudflare.com"
+    line = (
+        "2026-06-09T12:00:00Z INF "
+        "+--------------------------------------------------------------------------------------+ "
+        "https://demo.trycloudflare.com"
+    )
 
     assert provider.parse_public_url(line) == "https://demo.trycloudflare.com"
 

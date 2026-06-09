@@ -3,9 +3,9 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Callable, Sequence
-
 
 LineHandler = Callable[[str], None]
 LinePredicate = Callable[[str], bool]
@@ -84,10 +84,8 @@ def terminate_processes(
                 handle.process.kill()
 
     for handle in handles:
-        try:
+        with suppress(subprocess.TimeoutExpired):
             handle.process.wait(timeout=kill_timeout)
-        except subprocess.TimeoutExpired:
-            pass
 
     for handle in handles:
         handle.output_thread.join(timeout=kill_timeout)

@@ -6,14 +6,18 @@ from typing import Literal, Protocol
 from streamlit_remote.providers.cloudflare import CloudflareQuickTunnelProvider
 from streamlit_remote.providers.ngrok import NgrokProvider
 
-
 TunnelLogLevel = Literal["info", "warn", "error", "off"]
 
 
 class TunnelProvider(Protocol):
-    name: str
-    log_prefix: str
-    install_hint: str
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def log_prefix(self) -> str: ...
+
+    @property
+    def install_hint(self) -> str: ...
 
     def build_command(
         self,

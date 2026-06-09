@@ -7,8 +7,9 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
-from typing import Sequence
 
 from streamlit_remote.https import (
     HttpsError,
@@ -185,8 +186,7 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
     cert_files = [namespace.ssl_cert_file, namespace.ssl_key_file]
     if namespace.https_mode != "cert-files" and any(path is not None for path in cert_files):
         raise CliError(
-            "`--ssl-cert-file` and `--ssl-key-file` can only be used with "
-            "`--https cert-files`."
+            "`--ssl-cert-file` and `--ssl-key-file` can only be used with `--https cert-files`."
         )
 
     if namespace.no_remote and namespace.remote_auth != "off":
@@ -208,9 +208,7 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
                 "`--ngrok-traffic-policy-file` can only be used with `--provider ngrok`."
             )
         if namespace.remote_auth != "off":
-            raise CliError(
-                "`--ngrok-traffic-policy-file` cannot be combined with `--remote-auth`."
-            )
+            raise CliError("`--ngrok-traffic-policy-file` cannot be combined with `--remote-auth`.")
         if not namespace.ngrok_traffic_policy_file.exists():
             raise CliError(
                 f"ngrok Traffic Policy file not found: {namespace.ngrok_traffic_policy_file}"
@@ -371,6 +369,7 @@ def run(namespace: argparse.Namespace) -> int:
             )
 
         if tunnel_command is not None:
+            assert provider is not None
             handles.append(
                 start_logged_process(
                     tunnel_command,
@@ -476,7 +475,5 @@ def classify_tunnel_line(line: str) -> str:
 
 
 def open_browser(url: str) -> None:
-    try:
+    with suppress(Exception):
         webbrowser.open(url, new=2)
-    except Exception:
-        pass

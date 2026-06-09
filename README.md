@@ -223,7 +223,22 @@ The current package does not include production Cloudflare named tunnels, Cloudf
 ## Development
 
 ```bash
+uv run ruff format
+uv run ruff check --fix
+uv run basedpyright
 uv run pytest
+```
+
+Install the local pre-commit hooks with:
+
+```bash
+uv run pre-commit install
+```
+
+Run all hooks manually with:
+
+```bash
+uv run pre-commit run --all-files
 ```
 
 ## Release Management

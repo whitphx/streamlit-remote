@@ -277,9 +277,7 @@ def is_reusable_certificate(
 
     try:
         cert = x509.load_pem_x509_certificate(cert_file.read_bytes())
-        sans = cert.extensions.get_extension_for_class(
-            x509.SubjectAlternativeName
-        ).value
+        sans = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
     except (OSError, ValueError, x509.ExtensionNotFound):
         return False
 
