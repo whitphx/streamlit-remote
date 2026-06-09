@@ -161,6 +161,25 @@ def test_run_cli_dry_run_prints_cloudflare_self_signed_origin_flag(
     assert "cloudflared tunnel --url https://localhost:8501 --no-tls-verify" in captured.out
 
 
+def test_run_cli_dry_run_prints_mkcert_https_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [str(app_path), "--dry-run", "--https", "mkcert", "--no-remote"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "--server.sslCertFile" in captured.out
+    assert "--server.sslKeyFile" in captured.out
+    assert "mkcert certificate will be prepared at runtime" in captured.out
+    assert "Remote access: disabled" in captured.out
+
+
 def test_run_cli_reports_missing_cloudflared(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

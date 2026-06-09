@@ -4,6 +4,8 @@ import hashlib
 import ipaddress
 import json
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,6 +42,9 @@ def prepare_https_material(
 
     if mode == "self-signed":
         return prepare_self_signed_material(host, valid_days, cache_dir)
+
+    if mode == "mkcert":
+        return prepare_mkcert_material(host, cache_dir)
 
     raise HttpsError(f"Unsupported HTTPS mode: {mode}")
 
@@ -126,6 +131,65 @@ def planned_self_signed_material(
     return HttpsMaterial(cert_file=cert_file, key_file=key_file)
 
 
+def prepare_mkcert_material(
+    host: str,
+    cache_dir: Path | None = None,
+) -> HttpsMaterial:
+    if shutil.which("mkcert") is None:
+        raise HttpsError(
+            "mkcert was not found on PATH. Install mkcert from "
+            "https://github.com/FiloSottile/mkcert and try again."
+        )
+
+    sans = mkcert_hosts_for_host(host)
+    cert_file, key_file, metadata_file = mkcert_paths(host, cache_dir)
+    cert_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    if cert_file.is_file() and key_file.is_file():
+        return HttpsMaterial(cert_file=cert_file, key_file=key_file)
+
+    run_mkcert(["mkcert", "-install"])
+    run_mkcert(
+        [
+            "mkcert",
+            "-cert-file",
+            str(cert_file),
+            "-key-file",
+            str(key_file),
+            *sans,
+        ]
+    )
+
+    metadata_file.write_text(
+        json.dumps({"hosts": sans}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if key_file.exists():
+        os.chmod(key_file, 0o600)
+
+    return HttpsMaterial(cert_file=cert_file, key_file=key_file)
+
+
+def planned_mkcert_material(
+    host: str,
+    cache_dir: Path | None = None,
+) -> HttpsMaterial:
+    cert_file, key_file, _ = mkcert_paths(host, cache_dir)
+    return HttpsMaterial(cert_file=cert_file, key_file=key_file)
+
+
+def run_mkcert(command: list[str]) -> None:
+    try:
+        subprocess.run(command, check=True)
+    except FileNotFoundError as exc:
+        raise HttpsError(
+            "mkcert was not found on PATH. Install mkcert from "
+            "https://github.com/FiloSottile/mkcert and try again."
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise HttpsError(f"mkcert command failed: {' '.join(command)}") from exc
+
+
 def self_signed_paths(
     host: str,
     cache_dir: Path | None = None,
@@ -149,8 +213,39 @@ def self_signed_paths(
     )
 
 
+def mkcert_paths(
+    host: str,
+    cache_dir: Path | None = None,
+) -> tuple[Path, Path, Path]:
+    hosts = mkcert_hosts_for_host(host)
+    cert_dir = cache_dir if cache_dir is not None else default_cert_cache_dir()
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "schema": 1,
+                "tool": "mkcert",
+                "hosts": hosts,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+
+    return (
+        cert_dir / f"mkcert-{fingerprint}.crt",
+        cert_dir / f"mkcert-{fingerprint}.key",
+        cert_dir / f"mkcert-{fingerprint}.json",
+    )
+
+
 def default_cert_cache_dir() -> Path:
     return Path.home() / ".streamlit-remote" / "certs"
+
+
+def mkcert_hosts_for_host(host: str) -> list[str]:
+    hosts = ["localhost", "127.0.0.1", "::1"]
+    if host and host not in hosts:
+        hosts.append(host)
+    return hosts
 
 
 def subject_alt_names_for_host(host: str) -> list[x509.GeneralName]:

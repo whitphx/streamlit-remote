@@ -41,6 +41,7 @@ st-remote app.py --no-remote
 st-remote app.py --no-browser
 st-remote app.py --dry-run
 st-remote app.py --https self-signed --no-remote
+st-remote app.py --https mkcert --no-remote
 st-remote app.py --provider ngrok
 st-remote app.py --provider ngrok --tunnel-log-level warn
 st-remote app.py -- --server.headless true
@@ -67,6 +68,20 @@ st-remote app.py --https self-signed --no-remote
 `streamlit-remote` creates and reuses a local development certificate in its own cache directory, then passes Streamlit's `server.sslCertFile` and `server.sslKeyFile` options automatically. You do not need to choose filenames or manage generated certificate files.
 
 Browsers generally do not trust self-signed certificates by default. You may see a certificate warning unless you manually trust the generated certificate. This mode is intended for local development and testing, not production.
+
+For trusted local HTTPS, use mkcert:
+
+```bash
+st-remote app.py --https mkcert --no-remote
+```
+
+This requires the `mkcert` command to be installed and available on `PATH`.
+
+Install instructions are available from mkcert:
+
+https://github.com/FiloSottile/mkcert
+
+`streamlit-remote` creates and reuses mkcert certificate files in its own cache directory, runs `mkcert -install` when it needs to generate them, and passes Streamlit's SSL options automatically.
 
 Advanced users can pass existing certificate files:
 
@@ -142,7 +157,7 @@ HTTPS serving means the user-facing URL uses HTTPS. Remote access means the app 
 
 Cloudflare Quick Tunnel and ngrok usually provide both at once: Streamlit can run locally over plain HTTP, while the provider gives you a public HTTPS URL that forwards to the local app.
 
-Local self-signed HTTPS is different: Streamlit itself runs with HTTPS locally. You can use this without remote access, or combine it with a remote provider when you specifically want HTTPS between the tunnel agent and Streamlit.
+Local self-signed and mkcert HTTPS are different: Streamlit itself runs with HTTPS locally. You can use local HTTPS without remote access, or combine it with a remote provider when you specifically want HTTPS between the tunnel agent and Streamlit.
 
 Common combinations:
 
@@ -155,6 +170,9 @@ Common combinations:
 
 --https self-signed + --no-remote
   Local HTTPS Streamlit only.
+
+--https mkcert + --no-remote
+  Local HTTPS Streamlit with a locally trusted mkcert certificate.
 
 --https self-signed + --provider ngrok
   Public HTTPS via ngrok, local HTTPS between ngrok and Streamlit.
@@ -172,11 +190,10 @@ Streamlit's built-in SSL configuration is useful for local testing, but it is no
 
 ## Limitations
 
-The current package does not include mkcert integration, production Cloudflare named tunnels, authentication, password protection, reverse proxy management, or PyPI publishing automation.
+The current package does not include production Cloudflare named tunnels, authentication, password protection, or reverse proxy management.
 
 ## Roadmap
 
-- local HTTPS with mkcert
 - optional auth and access-control integration
 
 ## Development

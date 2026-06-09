@@ -13,6 +13,7 @@ from typing import Sequence
 from streamlit_remote.https import (
     HttpsError,
     HttpsMaterial,
+    planned_mkcert_material,
     planned_self_signed_material,
     prepare_https_material,
 )
@@ -50,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--https",
         dest="https_mode",
         default="off",
-        choices=["off", "self-signed", "cert-files"],
+        choices=["off", "self-signed", "mkcert", "cert-files"],
         help="Local Streamlit HTTPS mode.",
     )
     parser.add_argument(
@@ -220,6 +221,8 @@ def run(namespace: argparse.Namespace) -> int:
             print(f"Tunnel command:\n  {shlex.join(tunnel_command)}")
         if namespace.https_mode == "self-signed":
             print("HTTPS: managed self-signed certificate will be prepared at runtime")
+        elif namespace.https_mode == "mkcert":
+            print("HTTPS: mkcert certificate will be prepared at runtime")
         return 0
 
     require_streamlit()
@@ -341,6 +344,9 @@ class CliError(Exception):
 def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial | None:
     if namespace.dry_run and namespace.https_mode == "self-signed":
         return planned_self_signed_material(namespace.host)
+
+    if namespace.dry_run and namespace.https_mode == "mkcert":
+        return planned_mkcert_material(namespace.host)
 
     return prepare_https_material(
         mode=namespace.https_mode,

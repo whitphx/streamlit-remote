@@ -5,6 +5,9 @@ from cryptography import x509
 
 from streamlit_remote.https import (
     HttpsError,
+    mkcert_hosts_for_host,
+    mkcert_paths,
+    prepare_mkcert_material,
     prepare_https_material,
     prepare_self_signed_material,
     subject_alt_names_for_host,
@@ -73,3 +76,76 @@ def test_prepare_self_signed_material_rejects_invalid_validity(
 ) -> None:
     with pytest.raises(HttpsError, match="at least 1"):
         prepare_self_signed_material("127.0.0.1", valid_days=0, cache_dir=tmp_path)
+
+
+def test_mkcert_hosts_include_local_defaults_and_host() -> None:
+    assert mkcert_hosts_for_host("localhost") == ["localhost", "127.0.0.1", "::1"]
+    assert mkcert_hosts_for_host("example.test") == [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "example.test",
+    ]
+
+
+def test_prepare_mkcert_material_generates_cert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr("streamlit_remote.https.shutil.which", lambda name: "/usr/bin/mkcert")
+
+    def fake_run_mkcert(command: list[str]) -> None:
+        commands.append(command)
+        if "-cert-file" in command:
+            cert_file = Path(command[command.index("-cert-file") + 1])
+            key_file = Path(command[command.index("-key-file") + 1])
+            cert_file.write_text("cert", encoding="utf-8")
+            key_file.write_text("key", encoding="utf-8")
+
+    monkeypatch.setattr("streamlit_remote.https.run_mkcert", fake_run_mkcert)
+
+    material = prepare_mkcert_material("example.test", cache_dir=tmp_path)
+
+    assert material.cert_file.is_file()
+    assert material.key_file.is_file()
+    assert commands[0] == ["mkcert", "-install"]
+    assert commands[1][:5] == [
+        "mkcert",
+        "-cert-file",
+        str(material.cert_file),
+        "-key-file",
+        str(material.key_file),
+    ]
+    assert commands[1][5:] == ["localhost", "127.0.0.1", "::1", "example.test"]
+
+
+def test_prepare_mkcert_material_reuses_existing_cert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("streamlit_remote.https.shutil.which", lambda name: "/usr/bin/mkcert")
+    monkeypatch.setattr(
+        "streamlit_remote.https.run_mkcert",
+        lambda command: pytest.fail("unexpected mkcert call"),
+    )
+
+    cert_file, key_file, _ = mkcert_paths("localhost", cache_dir=tmp_path)
+    cert_file.parent.mkdir(parents=True, exist_ok=True)
+    cert_file.write_text("cert", encoding="utf-8")
+    key_file.write_text("key", encoding="utf-8")
+    second = prepare_mkcert_material("localhost", cache_dir=tmp_path)
+
+    assert second.cert_file == cert_file
+    assert second.key_file == key_file
+
+
+def test_prepare_mkcert_material_reports_missing_mkcert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("streamlit_remote.https.shutil.which", lambda name: None)
+
+    with pytest.raises(HttpsError, match="mkcert was not found"):
+        prepare_mkcert_material("localhost", cache_dir=tmp_path)
