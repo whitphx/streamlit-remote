@@ -5,9 +5,16 @@ import importlib.util
 import shlex
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Sequence
 
+from streamlit_remote.https import (
+    HttpsError,
+    HttpsMaterial,
+    planned_self_signed_material,
+    prepare_https_material,
+)
 from streamlit_remote.process import (
     ManagedProcess,
     start_logged_process,
@@ -15,6 +22,7 @@ from streamlit_remote.process import (
     wait_for_process_exit,
 )
 from streamlit_remote.providers import get_provider
+from streamlit_remote.server import LocalServerConfig, is_port_available, wait_until_listening
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,8 +36,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--provider",
         default="cloudflare",
-        choices=["cloudflare"],
+        choices=["cloudflare", "ngrok"],
         help="Remote tunnel provider.",
+    )
+    parser.add_argument(
+        "--tunnel-log-level",
+        default="info",
+        choices=["info", "warn", "error", "off"],
+        help="Tunnel provider log verbosity.",
+    )
+    parser.add_argument(
+        "--https",
+        dest="https_mode",
+        default="off",
+        choices=["off", "self-signed", "cert-files"],
+        help="Local Streamlit HTTPS mode.",
+    )
+    parser.add_argument(
+        "--ssl-cert-file",
+        type=Path,
+        help="Existing certificate file for `--https cert-files`.",
+    )
+    parser.add_argument(
+        "--ssl-key-file",
+        type=Path,
+        help="Existing private key file for `--https cert-files`.",
+    )
+    parser.add_argument(
+        "--cert-valid-days",
+        type=int,
+        default=30,
+        help="Validity period for managed self-signed certificates.",
     )
     parser.add_argument(
         "--streamlit-arg",
@@ -59,6 +96,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     cli_args, passthrough_args = split_streamlit_args(argv)
     namespace = build_parser().parse_args(cli_args)
     namespace.streamlit_args = [*namespace.streamlit_arg, *passthrough_args]
+    validate_cli_options(namespace)
     return namespace
 
 
@@ -76,8 +114,9 @@ def build_streamlit_command(
     host: str,
     port: int,
     streamlit_args: Sequence[str] = (),
+    https_material: HttpsMaterial | None = None,
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-m",
         "streamlit",
@@ -87,8 +126,20 @@ def build_streamlit_command(
         host,
         "--server.port",
         str(port),
-        *streamlit_args,
     ]
+
+    if https_material is not None:
+        command.extend(
+            [
+                "--server.sslCertFile",
+                str(https_material.cert_file),
+                "--server.sslKeyFile",
+                str(https_material.key_file),
+            ]
+        )
+
+    command.extend(streamlit_args)
+    return command
 
 
 def validate_app_path(app_path: Path) -> None:
@@ -97,6 +148,15 @@ def validate_app_path(app_path: Path) -> None:
 
     if not app_path.is_file():
         raise CliError(f"Streamlit app path is not a file: {app_path}")
+
+
+def validate_cli_options(namespace: argparse.Namespace) -> None:
+    cert_files = [namespace.ssl_cert_file, namespace.ssl_key_file]
+    if namespace.https_mode != "cert-files" and any(path is not None for path in cert_files):
+        raise CliError(
+            "`--ssl-cert-file` and `--ssl-key-file` can only be used with "
+            "`--https cert-files`."
+        )
 
 
 def require_streamlit() -> None:
@@ -111,7 +171,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     try:
         namespace = parse_args(sys.argv[1:] if argv is None else argv)
         return run(namespace)
-    except CliError as exc:
+    except (CliError, HttpsError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -119,70 +179,132 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
 def run(namespace: argparse.Namespace) -> int:
     validate_app_path(namespace.app)
 
-    local_url = f"http://{namespace.host}:{namespace.port}"
-    streamlit_command = build_streamlit_command(
-        namespace.app,
-        namespace.host,
-        namespace.port,
-        namespace.streamlit_args,
+    scheme = "https" if namespace.https_mode != "off" else "http"
+    local_server = LocalServerConfig(
+        host=namespace.host,
+        port=namespace.port,
+        scheme=scheme,
     )
 
     provider = None
     tunnel_command: list[str] | None = None
     if not namespace.no_remote:
         provider = get_provider(namespace.provider)
-        tunnel_command = provider.build_command(local_url)
+        tunnel_command = provider.build_command(
+            local_server.url,
+            origin_tls_verify=namespace.https_mode != "self-signed",
+            tunnel_log_level=namespace.tunnel_log_level,
+        )
 
     if namespace.dry_run:
+        https_material = prepare_cli_https_material(namespace)
+        streamlit_command = build_streamlit_command(
+            namespace.app,
+            local_server.host,
+            local_server.port,
+            namespace.streamlit_args,
+            https_material=https_material,
+        )
         print(f"Streamlit command:\n  {shlex.join(streamlit_command)}")
         if tunnel_command is None:
             print("Remote access: disabled")
         else:
             print(f"Tunnel command:\n  {shlex.join(tunnel_command)}")
+        if namespace.https_mode == "self-signed":
+            print("HTTPS: managed self-signed certificate will be prepared at runtime")
         return 0
 
     require_streamlit()
+    if not is_port_available(local_server.host, local_server.port):
+        raise CliError(f"Port {local_server.port} is not available on {local_server.host}.")
+
     if provider is not None and not provider.is_available():
-        raise CliError(
-            "cloudflared was not found on PATH. Install Cloudflare Tunnel from "
-            "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ "
-            "and try again."
-        )
+        raise CliError(provider.install_hint)
+
+    https_material = prepare_cli_https_material(namespace)
+    streamlit_command = build_streamlit_command(
+        namespace.app,
+        local_server.host,
+        local_server.port,
+        namespace.streamlit_args,
+        https_material=https_material,
+    )
 
     print("Streamlit local URL:")
-    print(f"  {local_url}")
+    print(f"  {local_server.url}")
     if namespace.no_remote:
         print("\nRemote access: disabled")
     else:
+        if namespace.https_mode == "self-signed" and namespace.provider == "ngrok":
+            print(
+                "\nNote: ngrok already provides HTTPS for the public URL. "
+                "Local self-signed HTTPS will be used only between ngrok and Streamlit."
+            )
         print("\nStarting remote tunnel...")
 
     remote_url_printed = threading.Event()
+    remote_url_lock = threading.Lock()
 
-    def on_cloudflared_line(line: str) -> None:
-        if provider is None or remote_url_printed.is_set():
+    def report_remote_url(public_url: str) -> None:
+        with remote_url_lock:
+            if remote_url_printed.is_set():
+                return
+
+            remote_url_printed.set()
+            print("\nStreamlit local URL:")
+            print(f"  {local_server.url}")
+            print("\nRemote HTTPS URL:")
+            print(f"  {public_url}\n")
+
+    def on_tunnel_line(line: str) -> None:
+        if provider is None:
             return
 
         public_url = provider.parse_public_url(line)
-        if public_url is None:
+        if public_url is not None:
+            report_remote_url(public_url)
+
+    def poll_provider_public_url() -> None:
+        if provider is None:
             return
 
-        remote_url_printed.set()
-        print("\nStreamlit local URL:")
-        print(f"  {local_url}")
-        print("\nRemote HTTPS URL:")
-        print(f"  {public_url}\n")
+        while not remote_url_printed.is_set():
+            public_url = provider.get_public_url()
+            if public_url is not None:
+                report_remote_url(public_url)
+                return
+            time.sleep(0.5)
 
     handles: list[ManagedProcess] = []
+    public_url_poll_thread: threading.Thread | None = None
     try:
         handles.append(start_logged_process(streamlit_command, "streamlit"))
+        if tunnel_command is not None and not wait_until_listening(
+            local_server.host,
+            local_server.port,
+        ):
+            raise CliError(
+                f"Streamlit did not start listening on {local_server.url} within the timeout."
+            )
+
         if tunnel_command is not None:
             handles.append(
                 start_logged_process(
                     tunnel_command,
-                    "cloudflared",
-                    on_line=on_cloudflared_line,
+                    provider.log_prefix,
+                    on_line=on_tunnel_line,
+                    should_print_line=lambda line: should_print_tunnel_line(
+                        line,
+                        namespace.tunnel_log_level,
+                    ),
                 )
             )
+            public_url_poll_thread = threading.Thread(
+                target=poll_provider_public_url,
+                name="streamlit-remote-public-url-poll",
+                daemon=True,
+            )
+            public_url_poll_thread.start()
 
         exited = wait_for_process_exit(handles)
         return exited.process.returncode if exited.process.returncode is not None else 1
@@ -190,7 +312,10 @@ def run(namespace: argparse.Namespace) -> int:
         print("\nInterrupted. Shutting down child processes...", file=sys.stderr)
         return 130
     finally:
+        remote_url_printed.set()
         terminate_processes(handles)
+        if public_url_poll_thread is not None:
+            public_url_poll_thread.join(timeout=1.0)
 
 
 def main() -> None:
@@ -199,3 +324,44 @@ def main() -> None:
 
 class CliError(Exception):
     pass
+
+
+def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial | None:
+    if namespace.dry_run and namespace.https_mode == "self-signed":
+        return planned_self_signed_material(namespace.host)
+
+    return prepare_https_material(
+        mode=namespace.https_mode,
+        host=namespace.host,
+        cert_file=namespace.ssl_cert_file,
+        key_file=namespace.ssl_key_file,
+        valid_days=namespace.cert_valid_days,
+    )
+
+
+def should_print_tunnel_line(line: str, tunnel_log_level: str) -> bool:
+    if tunnel_log_level == "off":
+        return False
+
+    if tunnel_log_level == "info":
+        return True
+
+    severity = classify_tunnel_line(line)
+    if tunnel_log_level == "warn":
+        return severity in {"warn", "error"}
+
+    if tunnel_log_level == "error":
+        return severity == "error"
+
+    return True
+
+
+def classify_tunnel_line(line: str) -> str:
+    lowered = line.lower()
+    if any(marker in lowered for marker in ("lvl=error", "lvl=crit", " err ", " error", "fatal")):
+        return "error"
+
+    if any(marker in lowered for marker in ("lvl=warn", " wrn ", " warn", "warning")):
+        return "warn"
+
+    return "info"

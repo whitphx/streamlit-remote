@@ -12,6 +12,21 @@ def test_build_cloudflare_quick_tunnel_command() -> None:
     ]
 
 
+def test_build_cloudflare_quick_tunnel_command_without_origin_tls_verify() -> None:
+    provider = CloudflareQuickTunnelProvider()
+
+    assert provider.build_command(
+        "https://127.0.0.1:8501",
+        origin_tls_verify=False,
+    ) == [
+        "cloudflared",
+        "tunnel",
+        "--url",
+        "https://127.0.0.1:8501",
+        "--no-tls-verify",
+    ]
+
+
 def test_parse_trycloudflare_url_from_representative_log_line() -> None:
     provider = CloudflareQuickTunnelProvider()
 
