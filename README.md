@@ -184,3 +184,17 @@ The current package does not include mkcert integration, production Cloudflare n
 ```bash
 uv run pytest
 ```
+
+## Release Management
+
+This project uses `scriv-release` for changelog-fragment based releases.
+
+For user-visible changes, add a fragment:
+
+```bash
+uv run scriv create --edit
+```
+
+When fragments are merged to `main`, the release workflow opens or updates a changelog preview PR. Merging that preview PR tags the release. Tag pushes matching `v*` run the PyPI publish workflow through Trusted Publishing.
+
+The release workflow expects a GitHub App configured through `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_KEY` so release tags can trigger the downstream publish workflow.

@@ -4,14 +4,31 @@ version = "0.1.0"
 description = "Run Streamlit apps with optional remote HTTPS access."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Yuichiro Tachibana (Tsuchiya)", email = "t.yic.yt@gmail.com" }
 ]
 requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+]
 dependencies = [
     "cryptography>=42",
     "streamlit>=1.28",
 ]
+
+[project.urls]
+Homepage = "https://github.com/whitphx/streamlit-remote"
+Repository = "https://github.com/whitphx/streamlit-remote"
+Issues = "https://github.com/whitphx/streamlit-remote/issues"
 
 [project.scripts]
 st-remote = "streamlit_remote.cli:main"
@@ -20,7 +37,25 @@ streamlit-remote = "streamlit_remote.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "scriv-release>=0.7",
 ]
+
+[tool.scriv]
+categories = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security", "Chore"]
+format = "md"
+md_header_level = 2
+
+[tool.scriv-release]
+version_provider = "uv"
+
+[tool.scriv-release.category_semver_map]
+Added = "minor"
+Changed = "minor"
+Deprecated = "minor"
+Removed = "major"
+Fixed = "patch"
+Security = "patch"
+Chore = "patch"
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]

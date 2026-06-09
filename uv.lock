@@ -277,6 +277,18 @@ wheels = [
 ]
 
 [[package]]
+name = "click-log"
+version = "0.4.0"
+source = { registry = "https://pypi.flatt.tech/simple/" }
+dependencies = [
+    { name = "click" },
+]
+sdist = { url = "https://pypi.flatt.tech/files/packages/32/32/228be4f971e4bd556c33d52a22682bfe318ffe57a1ddb7a546f347a90260/click-log-0.4.0.tar.gz", hash = "sha256:3970f8570ac54491237bcdb3d8ab5e3eef6c057df29f8c3d1151a51a9c23b975", size = 9985, upload-time = "2022-03-13T11:10:15.262Z" }
+wheels = [
+    { url = "https://pypi.flatt.tech/files/packages/ae/5a/4f025bc751087833686892e17e7564828e409c43b632878afeae554870cd/click_log-0.4.0-py2.py3-none-any.whl", hash = "sha256:a43e394b528d52112af599f2fc9e4b7cf3c15f94e53581f74fa6867e68c91756", size = 4273, upload-time = "2022-03-13T11:10:17.594Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.flatt.tech/simple/" }
@@ -508,6 +520,18 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown-it-py"
+version = "4.2.0"
+source = { registry = "https://pypi.flatt.tech/simple/" }
+dependencies = [
+    { name = "mdurl" },
+]
+sdist = { url = "https://pypi.flatt.tech/files/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49", size = 82454, upload-time = "2026-05-07T12:08:28.36Z" }
+wheels = [
+    { url = "https://pypi.flatt.tech/files/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.flatt.tech/simple/" }
@@ -590,6 +614,15 @@ wheels = [
     { url = "https://pypi.flatt.tech/files/packages/fb/df/5bd7a48c256faecd1d36edc13133e51397e41b73bb77e1a69deab746ebac/markupsafe-3.0.3-cp314-cp314t-win32.whl", hash = "sha256:915c04ba3851909ce68ccc2b8e2cd691618c4dc4c4232fb7982bca3f41fd8c3d", size = 14819, upload-time = "2025-09-27T18:37:26.285Z" },
     { url = "https://pypi.flatt.tech/files/packages/1a/8a/0402ba61a2f16038b48b39bccca271134be00c5c9f0f623208399333c448/markupsafe-3.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4faffd047e07c38848ce017e8725090413cd80cbc23d86e55c587bf979e579c9", size = 15426, upload-time = "2025-09-27T18:37:27.316Z" },
     { url = "https://pypi.flatt.tech/files/packages/70/bc/6f1c2f612465f5fa89b95bead1f44dcb607670fd42891d8fdcd5d039f4f4/markupsafe-3.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:32001d6a8fc98c8cb5c947787c5d08b0a50663d139f1305bac5885d98d9b40fa", size = 14146, upload-time = "2025-09-27T18:37:28.327Z" },
+]
+
+[[package]]
+name = "mdurl"
+version = "0.1.2"
+source = { registry = "https://pypi.flatt.tech/simple/" }
+sdist = { url = "https://pypi.flatt.tech/files/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
+wheels = [
+    { url = "https://pypi.flatt.tech/files/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
 
 [[package]]
@@ -1454,6 +1487,37 @@ wheels = [
 ]
 
 [[package]]
+name = "scriv"
+version = "1.8.0"
+source = { registry = "https://pypi.flatt.tech/simple/" }
+dependencies = [
+    { name = "attrs" },
+    { name = "click" },
+    { name = "click-log" },
+    { name = "jinja2" },
+    { name = "markdown-it-py" },
+    { name = "requests" },
+]
+sdist = { url = "https://pypi.flatt.tech/files/packages/14/9a/2ef2209e0672b264a2f2574dc88ea3cd9cfc9adfecbfd3165a900980ec8c/scriv-1.8.0.tar.gz", hash = "sha256:7b1a105dd411ac541998250fc8594742419f94cee984ca1257c5ebf5af21918b", size = 98160, upload-time = "2025-12-30T00:01:10.13Z" }
+wheels = [
+    { url = "https://pypi.flatt.tech/files/packages/02/e7/062480ede84ecb56ee0f8f2e5b5a3b2a5bceeb73bbdf909d3c13f5438749/scriv-1.8.0-py3-none-any.whl", hash = "sha256:f00f51325b2f4bc96b16fbb1239d4ab577cc2422301a5dd4f5f9378aae2549e0", size = 39085, upload-time = "2025-12-30T00:01:08.599Z" },
+]
+
+[[package]]
+name = "scriv-release"
+version = "0.7.0"
+source = { registry = "https://pypi.flatt.tech/simple/" }
+dependencies = [
+    { name = "packaging" },
+    { name = "scriv" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://pypi.flatt.tech/files/packages/78/80/ae2514780b1229d802d938152e9ec737a9cad6323d2d1650f4cdffb34d35/scriv_release-0.7.0.tar.gz", hash = "sha256:4ecd94dc74d457c1166d14ec6593954aadcab3ef6ac748d34ed3d0eac1a060f6", size = 145784, upload-time = "2026-05-16T01:52:10.519Z" }
+wheels = [
+    { url = "https://pypi.flatt.tech/files/packages/42/45/c0518d6c9715efc81c7c44504fc4ff4e847d32af537513346df1381706a3/scriv_release-0.7.0-py3-none-any.whl", hash = "sha256:80147d9bcc8e18675969be39144d02e0d5147966bfac6604c7671c179431d472", size = 15500, upload-time = "2026-05-16T01:52:08.554Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.flatt.tech/simple/" }
@@ -1533,6 +1597,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "scriv-release" },
 ]
 
 [package.metadata]
@@ -1542,7 +1607,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "scriv-release", specifier = ">=0.7" },
+]
 
 [[package]]
 name = "tenacity"
