@@ -24,6 +24,12 @@ from streamlit_remote.process import (
     wait_for_process_exit,
 )
 from streamlit_remote.providers import get_provider
+from streamlit_remote.providers.ngrok import (
+    MANAGED_OAUTH_PROVIDERS,
+    PreparedNgrokTrafficPolicy,
+    planned_managed_oauth_policy,
+    prepare_managed_oauth_policy,
+)
 from streamlit_remote.server import LocalServerConfig, is_port_available, wait_until_listening
 
 
@@ -75,6 +81,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Extra argument passed to Streamlit. Can be repeated.",
+    )
+    parser.add_argument(
+        "--remote-auth",
+        default="off",
+        choices=["off", "oauth"],
+        help="Remote tunnel authentication mode.",
+    )
+    parser.add_argument(
+        "--oauth-provider",
+        choices=MANAGED_OAUTH_PROVIDERS,
+        help="Managed ngrok OAuth provider for `--remote-auth oauth`. Defaults to google.",
+    )
+    parser.add_argument(
+        "--ngrok-traffic-policy-file",
+        type=Path,
+        help="Existing ngrok Traffic Policy file to attach to the remote tunnel.",
     )
     parser.add_argument(
         "--no-remote",
@@ -167,6 +189,37 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
             "`--https cert-files`."
         )
 
+    if namespace.no_remote and namespace.remote_auth != "off":
+        raise CliError("`--remote-auth` requires remote access. Remove `--no-remote`.")
+
+    if namespace.remote_auth != "off" and namespace.provider != "ngrok":
+        raise CliError("`--remote-auth` is currently supported only with `--provider ngrok`.")
+
+    if namespace.oauth_provider is not None and namespace.remote_auth != "oauth":
+        raise CliError("`--oauth-provider` can only be used with `--remote-auth oauth`.")
+
+    if namespace.ngrok_traffic_policy_file is not None:
+        if namespace.no_remote:
+            raise CliError(
+                "`--ngrok-traffic-policy-file` requires remote access. Remove `--no-remote`."
+            )
+        if namespace.provider != "ngrok":
+            raise CliError(
+                "`--ngrok-traffic-policy-file` can only be used with `--provider ngrok`."
+            )
+        if namespace.remote_auth != "off":
+            raise CliError(
+                "`--ngrok-traffic-policy-file` cannot be combined with `--remote-auth`."
+            )
+        if not namespace.ngrok_traffic_policy_file.exists():
+            raise CliError(
+                f"ngrok Traffic Policy file not found: {namespace.ngrok_traffic_policy_file}"
+            )
+        if not namespace.ngrok_traffic_policy_file.is_file():
+            raise CliError(
+                f"ngrok Traffic Policy path is not a file: {namespace.ngrok_traffic_policy_file}"
+            )
+
 
 def require_streamlit() -> None:
     if importlib.util.find_spec("streamlit") is None:
@@ -197,12 +250,17 @@ def run(namespace: argparse.Namespace) -> int:
 
     provider = None
     tunnel_command: list[str] | None = None
+    traffic_policy: PreparedNgrokTrafficPolicy | None = None
     if not namespace.no_remote:
         provider = get_provider(namespace.provider)
+        traffic_policy = prepare_cli_ngrok_traffic_policy(namespace, dry_run=True)
         tunnel_command = provider.build_command(
             local_server.url,
             origin_tls_verify=namespace.https_mode != "self-signed",
             tunnel_log_level=namespace.tunnel_log_level,
+            traffic_policy_file=(
+                traffic_policy.traffic_policy_file if traffic_policy is not None else None
+            ),
         )
 
     if namespace.dry_run:
@@ -233,6 +291,7 @@ def run(namespace: argparse.Namespace) -> int:
         raise CliError(provider.install_hint)
 
     https_material = prepare_cli_https_material(namespace)
+    traffic_policy = prepare_cli_ngrok_traffic_policy(namespace, dry_run=False)
     streamlit_command = build_streamlit_command(
         namespace.app,
         local_server.host,
@@ -240,6 +299,15 @@ def run(namespace: argparse.Namespace) -> int:
         namespace.streamlit_args,
         https_material=https_material,
     )
+    if provider is not None:
+        tunnel_command = provider.build_command(
+            local_server.url,
+            origin_tls_verify=namespace.https_mode != "self-signed",
+            tunnel_log_level=namespace.tunnel_log_level,
+            traffic_policy_file=(
+                traffic_policy.traffic_policy_file if traffic_policy is not None else None
+            ),
+        )
 
     print("Streamlit local URL:")
     print(f"  {local_server.url}")
@@ -331,6 +399,8 @@ def run(namespace: argparse.Namespace) -> int:
         terminate_processes(handles)
         if public_url_poll_thread is not None:
             public_url_poll_thread.join(timeout=1.0)
+        if traffic_policy is not None:
+            traffic_policy.cleanup()
 
 
 def main() -> None:
@@ -355,6 +425,26 @@ def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial |
         key_file=namespace.ssl_key_file,
         valid_days=namespace.cert_valid_days,
     )
+
+
+def prepare_cli_ngrok_traffic_policy(
+    namespace: argparse.Namespace,
+    *,
+    dry_run: bool,
+) -> PreparedNgrokTrafficPolicy | None:
+    if namespace.no_remote or namespace.provider != "ngrok":
+        return None
+
+    if namespace.ngrok_traffic_policy_file is not None:
+        return PreparedNgrokTrafficPolicy(namespace.ngrok_traffic_policy_file)
+
+    if namespace.remote_auth == "oauth":
+        oauth_provider = namespace.oauth_provider or "google"
+        if dry_run:
+            return planned_managed_oauth_policy(oauth_provider)
+        return prepare_managed_oauth_policy(oauth_provider)
+
+    return None
 
 
 def should_print_tunnel_line(line: str, tunnel_log_level: str) -> bool:

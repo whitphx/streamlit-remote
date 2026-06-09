@@ -44,6 +44,8 @@ st-remote app.py --https self-signed --no-remote
 st-remote app.py --https mkcert --no-remote
 st-remote app.py --provider ngrok
 st-remote app.py --provider ngrok --tunnel-log-level warn
+st-remote app.py --provider ngrok --remote-auth oauth --oauth-provider google
+st-remote app.py --provider ngrok --ngrok-traffic-policy-file policy.yml
 st-remote app.py -- --server.headless true
 ```
 
@@ -131,6 +133,24 @@ st-remote app.py --provider ngrok --https self-signed
 
 ngrok still provides HTTPS for the public URL. The self-signed certificate is used only between the local ngrok agent and Streamlit.
 
+#### ngrok Remote Auth
+
+For quick access control with ngrok, use managed OAuth:
+
+```bash
+st-remote app.py --provider ngrok --remote-auth oauth --oauth-provider google
+```
+
+Supported managed OAuth providers are `github`, `gitlab`, `google`, `linkedin`, `microsoft`, and `twitch`. `streamlit-remote` writes a temporary ngrok Traffic Policy file, starts ngrok with `--traffic-policy-file`, and removes the temporary file on shutdown.
+
+Advanced users can provide their own ngrok Traffic Policy file:
+
+```bash
+st-remote app.py --provider ngrok --ngrok-traffic-policy-file policy.yml
+```
+
+This is useful for provider-specific policies such as OIDC, Basic Auth, IP restrictions, or custom OAuth configuration.
+
 ## Tunnel Logs
 
 Tunnel provider logs are shown by default:
@@ -186,15 +206,19 @@ This exposes a local Streamlit app to the internet.
 
 Do not use it for sensitive data unless you have proper authentication and access control in place. Cloudflare Quick Tunnel and ngrok are best suited for development, demos, and temporary sharing.
 
+ngrok remote auth can add provider-level access control before requests reach Streamlit. Cloudflare Quick Tunnel auth is not supported by this package; Cloudflare Access requires a configured Zero Trust application and is outside the current Quick Tunnel workflow.
+
 Streamlit's built-in SSL configuration is useful for local testing, but it is not a replacement for a production HTTPS reverse proxy.
 
 ## Limitations
 
-The current package does not include production Cloudflare named tunnels, authentication, password protection, or reverse proxy management.
+The current package does not include production Cloudflare named tunnels, Cloudflare Access integration, built-in password protection, or reverse proxy management.
 
 ## Roadmap
 
-- optional auth and access-control integration
+- Cloudflare named tunnel support
+- Cloudflare Access integration
+- more ngrok Traffic Policy helpers
 
 ## Development
 

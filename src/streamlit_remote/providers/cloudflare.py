@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 
 
 TRYCLOUDFLARE_URL_RE = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com\b")
@@ -24,6 +25,7 @@ class CloudflareQuickTunnelProvider:
         *,
         origin_tls_verify: bool = True,
         tunnel_log_level: str = "info",
+        traffic_policy_file: Path | None = None,
     ) -> list[str]:
         command = ["cloudflared", "tunnel", "--url", local_url]
         if not origin_tls_verify:

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
@@ -11,6 +13,7 @@ from urllib.request import urlopen
 
 HTTPS_URL_RE = re.compile(r"https://[^\s]+")
 AGENT_API_TUNNELS_URL = "http://127.0.0.1:4040/api/tunnels"
+MANAGED_OAUTH_PROVIDERS = ("github", "gitlab", "google", "linkedin", "microsoft", "twitch")
 
 
 @dataclass(frozen=True)
@@ -29,14 +32,20 @@ class NgrokProvider:
         *,
         origin_tls_verify: bool = True,
         tunnel_log_level: str = "info",
+        traffic_policy_file: Path | None = None,
     ) -> list[str]:
+        policy_args: list[str] = []
+        if traffic_policy_file is not None:
+            policy_args = ["--traffic-policy-file", str(traffic_policy_file)]
+
         if tunnel_log_level == "off":
-            return ["ngrok", "http", local_url, "--log", "false"]
+            return ["ngrok", "http", local_url, *policy_args, "--log", "false"]
 
         return [
             "ngrok",
             "http",
             local_url,
+            *policy_args,
             "--log",
             "stdout",
             "--log-format",
@@ -66,6 +75,42 @@ class NgrokProvider:
 
     def is_available(self) -> bool:
         return shutil.which("ngrok") is not None
+
+
+@dataclass
+class PreparedNgrokTrafficPolicy:
+    traffic_policy_file: Path
+    _tempdir: tempfile.TemporaryDirectory[str] | None = None
+
+    def cleanup(self) -> None:
+        if self._tempdir is not None:
+            self._tempdir.cleanup()
+
+
+def prepare_managed_oauth_policy(oauth_provider: str) -> PreparedNgrokTrafficPolicy:
+    tempdir = tempfile.TemporaryDirectory(prefix="streamlit-remote-ngrok-")
+    policy_file = Path(tempdir.name) / "oauth-policy.yml"
+    policy_file.write_text(build_managed_oauth_policy(oauth_provider), encoding="utf-8")
+    return PreparedNgrokTrafficPolicy(traffic_policy_file=policy_file, _tempdir=tempdir)
+
+
+def planned_managed_oauth_policy(oauth_provider: str) -> PreparedNgrokTrafficPolicy:
+    return PreparedNgrokTrafficPolicy(
+        traffic_policy_file=Path(f"<generated-ngrok-{oauth_provider}-oauth-policy.yml>")
+    )
+
+
+def build_managed_oauth_policy(oauth_provider: str) -> str:
+    if oauth_provider not in MANAGED_OAUTH_PROVIDERS:
+        raise ValueError(f"Unsupported ngrok managed OAuth provider: {oauth_provider}.")
+
+    return (
+        "on_http_request:\n"
+        "  - actions:\n"
+        "      - type: oauth\n"
+        "        config:\n"
+        f"          provider: {oauth_provider}\n"
+    )
 
 
 def parse_agent_api_public_url(payload: dict[str, Any]) -> str | None:
