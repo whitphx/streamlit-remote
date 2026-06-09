@@ -18,7 +18,7 @@ This package requires Python 3.10 or newer.
 st-remote app.py
 ```
 
-This starts Streamlit on `http://127.0.0.1:8501`, starts a Cloudflare Quick Tunnel to that local URL, prefixes logs from both child processes, and prints the public `trycloudflare.com` URL once Cloudflare reports it.
+This starts Streamlit on `http://localhost:8501`, starts a Cloudflare Quick Tunnel to that local URL, prefixes logs from both child processes, prints the public `trycloudflare.com` URL once Cloudflare reports it, and opens that remote URL in your browser.
 
 You can also use the alias:
 
@@ -29,7 +29,7 @@ streamlit-remote app.py
 ## Options
 
 ```bash
-st-remote APP [--port 8501] [--host 127.0.0.1] [--https off] [--provider cloudflare]
+st-remote APP [--port 8501] [--host localhost] [--https off] [--provider cloudflare]
 ```
 
 Useful options:
@@ -38,6 +38,7 @@ Useful options:
 st-remote app.py --port 9000
 st-remote app.py --host 0.0.0.0
 st-remote app.py --no-remote
+st-remote app.py --no-browser
 st-remote app.py --dry-run
 st-remote app.py --https self-signed --no-remote
 st-remote app.py --provider ngrok
@@ -46,6 +47,8 @@ st-remote app.py -- --server.headless true
 ```
 
 Extra arguments after `--` are passed to `python -m streamlit run`.
+
+`st-remote` starts Streamlit in headless mode so Streamlit does not open the local URL automatically. When remote access is enabled, `st-remote` opens the detected remote HTTPS URL instead. Use `--no-browser` to suppress browser opening.
 
 ## Local HTTPS
 

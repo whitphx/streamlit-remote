@@ -6,6 +6,7 @@ import shlex
 import sys
 import threading
 import time
+import webbrowser
 from pathlib import Path
 from typing import Sequence
 
@@ -32,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("app", type=Path, metavar="APP", help="Streamlit app file path.")
     parser.add_argument("--port", type=int, default=8501, help="Local Streamlit port.")
-    parser.add_argument("--host", default="127.0.0.1", help="Local Streamlit host.")
+    parser.add_argument("--host", default="localhost", help="Local Streamlit host.")
     parser.add_argument(
         "--provider",
         default="cloudflare",
@@ -78,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-remote",
         action="store_true",
         help="Run Streamlit only without starting a remote tunnel.",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open the local or remote URL in a browser.",
     )
     parser.add_argument(
         "--dry-run",
@@ -126,6 +132,8 @@ def build_streamlit_command(
         host,
         "--server.port",
         str(port),
+        "--server.headless",
+        "true",
     ]
 
     if https_material is not None:
@@ -234,6 +242,8 @@ def run(namespace: argparse.Namespace) -> int:
     print(f"  {local_server.url}")
     if namespace.no_remote:
         print("\nRemote access: disabled")
+        if not namespace.no_browser:
+            open_browser(local_server.url)
     else:
         if namespace.https_mode == "self-signed" and namespace.provider == "ngrok":
             print(
@@ -255,6 +265,8 @@ def run(namespace: argparse.Namespace) -> int:
             print(f"  {local_server.url}")
             print("\nRemote HTTPS URL:")
             print(f"  {public_url}\n")
+            if not namespace.no_browser:
+                open_browser(public_url)
 
     def on_tunnel_line(line: str) -> None:
         if provider is None:
@@ -365,3 +377,10 @@ def classify_tunnel_line(line: str) -> str:
         return "warn"
 
     return "info"
+
+
+def open_browser(url: str) -> None:
+    try:
+        webbrowser.open(url, new=2)
+    except Exception:
+        pass
