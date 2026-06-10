@@ -10,7 +10,6 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
-
 HTTPS_URL_RE = re.compile(r"https://[^\s]+")
 AGENT_API_TUNNELS_URL = "http://127.0.0.1:4040/api/tunnels"
 MANAGED_OAUTH_PROVIDERS = ("github", "gitlab", "google", "linkedin", "microsoft", "twitch")

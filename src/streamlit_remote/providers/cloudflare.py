@@ -5,7 +5,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-
 TRYCLOUDFLARE_URL_RE = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com\b")
 
 

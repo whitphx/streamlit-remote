@@ -36,9 +36,33 @@ streamlit-remote = "streamlit_remote.cli:main"
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.6",
+    "pre-commit>=4.6.0",
     "pytest>=8.0",
+    "ruff>=0.15.16",
     "scriv-release>=0.7",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "C4",
+    "E",
+    "F",
+    "I",
+    "RUF",
+    "SIM",
+    "UP",
+]
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
 
 [tool.scriv]
 categories = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security", "Chore"]
