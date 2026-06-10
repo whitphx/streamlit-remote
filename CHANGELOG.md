@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.4.0'></a>
+## 0.4.0 — 2026-06-10
+
+### Added
+
+- Added CLI options for specifying custom `cloudflared`, `ngrok`, and `mkcert` binary paths, originally merged in #10.
+
 <a id='changelog-0.3.0'></a>
 ## 0.3.0 — 2026-06-10
 
