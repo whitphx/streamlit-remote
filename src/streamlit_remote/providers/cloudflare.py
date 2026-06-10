@@ -12,11 +12,19 @@ TRYCLOUDFLARE_URL_RE = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com\b"
 class CloudflareQuickTunnelProvider:
     name: str = "cloudflare"
     log_prefix: str = "cloudflared"
-    install_hint: str = (
-        "cloudflared was not found on PATH. Install Cloudflare Tunnel from "
-        "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ "
-        "and try again."
-    )
+    executable: str | Path = "cloudflared"
+
+    @property
+    def install_hint(self) -> str:
+        executable = str(self.executable)
+        if executable == "cloudflared":
+            return (
+                "cloudflared was not found on PATH. Install Cloudflare Tunnel from "
+                "https://developers.cloudflare.com/cloudflare-one/connections/"
+                "connect-networks/downloads/ "
+                "and try again."
+            )
+        return f"cloudflared was not found at configured path: {executable}"
 
     def build_command(
         self,
@@ -26,7 +34,7 @@ class CloudflareQuickTunnelProvider:
         tunnel_log_level: str = "info",
         traffic_policy_file: Path | None = None,
     ) -> list[str]:
-        command = ["cloudflared", "tunnel", "--url", local_url]
+        command = [str(self.executable), "tunnel", "--url", local_url]
         if not origin_tls_verify:
             command.append("--no-tls-verify")
         return command
@@ -41,4 +49,4 @@ class CloudflareQuickTunnelProvider:
         return None
 
     def is_available(self) -> bool:
-        return shutil.which("cloudflared") is not None
+        return shutil.which(str(self.executable)) is not None

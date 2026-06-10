@@ -95,6 +95,28 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     assert "cloudflared tunnel --url http://localhost:8501" in captured.out
 
 
+def test_run_cli_dry_run_uses_custom_cloudflared_binary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    cloudflared_binary = tmp_path / "bin" / "cloudflared"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--cloudflared-binary",
+            str(cloudflared_binary),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"{cloudflared_binary} tunnel --url http://localhost:8501" in captured.out
+
+
 def test_run_cli_dry_run_prints_managed_https_ngrok_command(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -120,6 +142,30 @@ def test_run_cli_dry_run_prints_managed_https_ngrok_command(
     assert "ngrok http https://localhost:8501" in captured.out
     assert "--log-level info" in captured.out
     assert "managed self-signed certificate" in captured.out
+
+
+def test_run_cli_dry_run_uses_custom_ngrok_binary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    ngrok_binary = tmp_path / "bin" / "ngrok"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "ngrok",
+            "--ngrok-binary",
+            str(ngrok_binary),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"{ngrok_binary} http http://localhost:8501" in captured.out
 
 
 def test_run_cli_dry_run_prints_ngrok_off_log_command(
@@ -253,6 +299,55 @@ def test_run_cli_rejects_remote_auth_with_cloudflare(
 
     assert exit_code == 2
     assert "supported only with `--provider ngrok`" in capsys.readouterr().err
+
+
+def test_run_cli_rejects_ngrok_binary_with_cloudflare(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--ngrok-binary", str(tmp_path / "ngrok")])
+
+    assert exit_code == 2
+    assert "`--ngrok-binary` can only be used with `--provider ngrok`" in (capsys.readouterr().err)
+
+
+def test_run_cli_rejects_cloudflared_binary_with_ngrok(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--cloudflared-binary",
+            str(tmp_path / "cloudflared"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "`--cloudflared-binary` can only be used with `--provider cloudflare`" in (
+        capsys.readouterr().err
+    )
+
+
+def test_run_cli_rejects_mkcert_binary_without_mkcert_https(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--mkcert-binary", str(tmp_path / "mkcert")])
+
+    assert exit_code == 2
+    assert "`--mkcert-binary` can only be used with `--https mkcert`" in capsys.readouterr().err
 
 
 def test_run_cli_rejects_remote_auth_without_remote(

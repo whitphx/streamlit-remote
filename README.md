@@ -42,7 +42,10 @@ st-remote app.py --no-browser
 st-remote app.py --dry-run
 st-remote app.py --https self-signed --no-remote
 st-remote app.py --https mkcert --no-remote
+st-remote app.py --https mkcert --mkcert-binary /path/to/mkcert --no-remote
 st-remote app.py --provider ngrok
+st-remote app.py --cloudflared-binary /path/to/cloudflared
+st-remote app.py --provider ngrok --ngrok-binary /path/to/ngrok
 st-remote app.py --provider ngrok --tunnel-log-level warn
 st-remote app.py --provider ngrok --remote-auth oauth --oauth-provider google
 st-remote app.py --provider ngrok --ngrok-traffic-policy-file policy.yml
@@ -77,7 +80,8 @@ For trusted local HTTPS, use mkcert:
 st-remote app.py --https mkcert --no-remote
 ```
 
-This requires the `mkcert` command to be installed and available on `PATH`.
+This requires the `mkcert` command to be installed and available on `PATH`. If it is
+installed somewhere else, pass `--mkcert-binary /path/to/mkcert`.
 
 Install instructions are available from mkcert:
 
@@ -97,7 +101,7 @@ st-remote app.py --https cert-files \
 
 ### Cloudflare Tunnel
 
-Cloudflare Quick Tunnel requires the `cloudflared` command to be installed and available on `PATH`.
+Cloudflare Quick Tunnel requires the `cloudflared` command to be installed and available on `PATH`. If it is installed somewhere else, pass `--cloudflared-binary /path/to/cloudflared`.
 
 Install instructions are available from Cloudflare:
 
@@ -107,7 +111,7 @@ https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do
 
 ### ngrok
 
-ngrok requires the `ngrok` command to be installed and available on `PATH`.
+ngrok requires the `ngrok` command to be installed and available on `PATH`. If it is installed somewhere else, pass `--ngrok-binary /path/to/ngrok`.
 
 Install instructions are available from ngrok:
 

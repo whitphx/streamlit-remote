@@ -33,6 +33,7 @@ def prepare_https_material(
     key_file: Path | None = None,
     valid_days: int = 30,
     cache_dir: Path | None = None,
+    mkcert_binary: str | Path = "mkcert",
 ) -> HttpsMaterial | None:
     if mode == "off":
         return None
@@ -44,7 +45,7 @@ def prepare_https_material(
         return prepare_self_signed_material(host, valid_days, cache_dir)
 
     if mode == "mkcert":
-        return prepare_mkcert_material(host, cache_dir)
+        return prepare_mkcert_material(host, cache_dir, mkcert_binary=mkcert_binary)
 
     raise HttpsError(f"Unsupported HTTPS mode: {mode}")
 
@@ -134,12 +135,16 @@ def planned_self_signed_material(
 def prepare_mkcert_material(
     host: str,
     cache_dir: Path | None = None,
+    mkcert_binary: str | Path = "mkcert",
 ) -> HttpsMaterial:
-    if shutil.which("mkcert") is None:
-        raise HttpsError(
-            "mkcert was not found on PATH. Install mkcert from "
-            "https://github.com/FiloSottile/mkcert and try again."
-        )
+    mkcert_command = str(mkcert_binary)
+    if shutil.which(mkcert_command) is None:
+        if mkcert_command == "mkcert":
+            raise HttpsError(
+                "mkcert was not found on PATH. Install mkcert from "
+                "https://github.com/FiloSottile/mkcert and try again."
+            )
+        raise HttpsError(f"mkcert was not found at configured path: {mkcert_command}")
 
     sans = mkcert_hosts_for_host(host)
     cert_file, key_file, metadata_file = mkcert_paths(host, cache_dir)
@@ -148,10 +153,10 @@ def prepare_mkcert_material(
     if cert_file.is_file() and key_file.is_file():
         return HttpsMaterial(cert_file=cert_file, key_file=key_file)
 
-    run_mkcert(["mkcert", "-install"])
+    run_mkcert([mkcert_command, "-install"])
     run_mkcert(
         [
-            "mkcert",
+            mkcert_command,
             "-cert-file",
             str(cert_file),
             "-key-file",
@@ -182,10 +187,12 @@ def run_mkcert(command: list[str]) -> None:
     try:
         subprocess.run(command, check=True)
     except FileNotFoundError as exc:
-        raise HttpsError(
-            "mkcert was not found on PATH. Install mkcert from "
-            "https://github.com/FiloSottile/mkcert and try again."
-        ) from exc
+        if command[0] == "mkcert":
+            raise HttpsError(
+                "mkcert was not found on PATH. Install mkcert from "
+                "https://github.com/FiloSottile/mkcert and try again."
+            ) from exc
+        raise HttpsError(f"mkcert was not found at configured path: {command[0]}") from exc
     except subprocess.CalledProcessError as exc:
         raise HttpsError(f"mkcert command failed: {' '.join(command)}") from exc
 

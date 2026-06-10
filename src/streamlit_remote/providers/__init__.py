@@ -35,11 +35,11 @@ class TunnelProvider(Protocol):
     def is_available(self) -> bool: ...
 
 
-def get_provider(name: str) -> TunnelProvider:
+def get_provider(name: str, executable: str | Path | None = None) -> TunnelProvider:
     if name == "cloudflare":
-        return CloudflareQuickTunnelProvider()
+        return CloudflareQuickTunnelProvider(executable=executable or "cloudflared")
 
     if name == "ngrok":
-        return NgrokProvider()
+        return NgrokProvider(executable=executable or "ngrok")
 
     raise ValueError(f"Unsupported provider: {name}")

@@ -55,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Tunnel provider log verbosity.",
     )
     parser.add_argument(
+        "--cloudflared-binary",
+        type=Path,
+        help="Path to the cloudflared executable.",
+    )
+    parser.add_argument(
+        "--ngrok-binary",
+        type=Path,
+        help="Path to the ngrok executable.",
+    )
+    parser.add_argument(
         "--https",
         dest="https_mode",
         default="off",
@@ -76,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="Validity period for managed self-signed certificates.",
+    )
+    parser.add_argument(
+        "--mkcert-binary",
+        type=Path,
+        help="Path to the mkcert executable.",
     )
     parser.add_argument(
         "--streamlit-arg",
@@ -195,6 +210,21 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
     if namespace.remote_auth != "off" and namespace.provider != "ngrok":
         raise CliError("`--remote-auth` is currently supported only with `--provider ngrok`.")
 
+    if namespace.cloudflared_binary is not None:
+        if namespace.no_remote:
+            raise CliError("`--cloudflared-binary` requires remote access. Remove `--no-remote`.")
+        if namespace.provider != "cloudflare":
+            raise CliError("`--cloudflared-binary` can only be used with `--provider cloudflare`.")
+
+    if namespace.ngrok_binary is not None:
+        if namespace.no_remote:
+            raise CliError("`--ngrok-binary` requires remote access. Remove `--no-remote`.")
+        if namespace.provider != "ngrok":
+            raise CliError("`--ngrok-binary` can only be used with `--provider ngrok`.")
+
+    if namespace.mkcert_binary is not None and namespace.https_mode != "mkcert":
+        raise CliError("`--mkcert-binary` can only be used with `--https mkcert`.")
+
     if namespace.oauth_provider is not None and namespace.remote_auth != "oauth":
         raise CliError("`--oauth-provider` can only be used with `--remote-auth oauth`.")
 
@@ -250,7 +280,11 @@ def run(namespace: argparse.Namespace) -> int:
     tunnel_command: list[str] | None = None
     traffic_policy: PreparedNgrokTrafficPolicy | None = None
     if not namespace.no_remote:
-        provider = get_provider(namespace.provider)
+        tunnel_binary = selected_tunnel_binary(namespace)
+        if tunnel_binary is None:
+            provider = get_provider(namespace.provider)
+        else:
+            provider = get_provider(namespace.provider, executable=tunnel_binary)
         traffic_policy = prepare_cli_ngrok_traffic_policy(namespace, dry_run=True)
         tunnel_command = provider.build_command(
             local_server.url,
@@ -423,7 +457,18 @@ def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial |
         cert_file=namespace.ssl_cert_file,
         key_file=namespace.ssl_key_file,
         valid_days=namespace.cert_valid_days,
+        mkcert_binary=namespace.mkcert_binary or "mkcert",
     )
+
+
+def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
+    if namespace.provider == "cloudflare":
+        return namespace.cloudflared_binary
+
+    if namespace.provider == "ngrok":
+        return namespace.ngrok_binary
+
+    return None
 
 
 def prepare_cli_ngrok_traffic_policy(
