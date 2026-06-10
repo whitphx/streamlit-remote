@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from streamlit_remote.providers.cloudflare import CloudflareQuickTunnelProvider
 
 
@@ -6,6 +8,17 @@ def test_build_cloudflare_quick_tunnel_command() -> None:
 
     assert provider.build_command("http://127.0.0.1:8501") == [
         "cloudflared",
+        "tunnel",
+        "--url",
+        "http://127.0.0.1:8501",
+    ]
+
+
+def test_build_cloudflare_quick_tunnel_command_with_custom_binary() -> None:
+    provider = CloudflareQuickTunnelProvider(executable=Path("/opt/cloudflared"))
+
+    assert provider.build_command("http://127.0.0.1:8501") == [
+        "/opt/cloudflared",
         "tunnel",
         "--url",
         "http://127.0.0.1:8501",

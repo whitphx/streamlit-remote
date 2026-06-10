@@ -19,11 +19,18 @@ MANAGED_OAUTH_PROVIDERS = ("github", "gitlab", "google", "linkedin", "microsoft"
 class NgrokProvider:
     name: str = "ngrok"
     log_prefix: str = "ngrok"
-    install_hint: str = (
-        "ngrok was not found on PATH. Install ngrok from "
-        "https://ngrok.com/download and configure your authtoken with "
-        "`ngrok config add-authtoken TOKEN`."
-    )
+    executable: str | Path = "ngrok"
+
+    @property
+    def install_hint(self) -> str:
+        executable = str(self.executable)
+        if executable == "ngrok":
+            return (
+                "ngrok was not found on PATH. Install ngrok from "
+                "https://ngrok.com/download and configure your authtoken with "
+                "`ngrok config add-authtoken TOKEN`."
+            )
+        return f"ngrok was not found at configured path: {executable}"
 
     def build_command(
         self,
@@ -38,10 +45,10 @@ class NgrokProvider:
             policy_args = ["--traffic-policy-file", str(traffic_policy_file)]
 
         if tunnel_log_level == "off":
-            return ["ngrok", "http", local_url, *policy_args, "--log", "false"]
+            return [str(self.executable), "http", local_url, *policy_args, "--log", "false"]
 
         return [
-            "ngrok",
+            str(self.executable),
             "http",
             local_url,
             *policy_args,
@@ -73,7 +80,7 @@ class NgrokProvider:
         return parse_agent_api_public_url(payload)
 
     def is_available(self) -> bool:
-        return shutil.which("ngrok") is not None
+        return shutil.which(str(self.executable)) is not None
 
 
 @dataclass

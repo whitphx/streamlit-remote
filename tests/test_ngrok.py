@@ -101,6 +101,22 @@ def test_build_ngrok_command_for_https_upstream() -> None:
     ]
 
 
+def test_build_ngrok_command_with_custom_binary() -> None:
+    provider = NgrokProvider(executable=Path("/opt/ngrok"))
+
+    assert provider.build_command("http://127.0.0.1:8501") == [
+        "/opt/ngrok",
+        "http",
+        "http://127.0.0.1:8501",
+        "--log",
+        "stdout",
+        "--log-format",
+        "logfmt",
+        "--log-level",
+        "info",
+    ]
+
+
 def test_parse_ngrok_forwarding_url() -> None:
     provider = NgrokProvider()
 

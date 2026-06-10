@@ -121,6 +121,34 @@ def test_prepare_mkcert_material_generates_cert(
     assert commands[1][5:] == ["localhost", "127.0.0.1", "::1", "example.test"]
 
 
+def test_prepare_mkcert_material_uses_custom_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+    mkcert_binary = tmp_path / "mkcert-custom"
+
+    monkeypatch.setattr(
+        "streamlit_remote.https.shutil.which",
+        lambda name: str(mkcert_binary) if name == str(mkcert_binary) else None,
+    )
+
+    def fake_run_mkcert(command: list[str]) -> None:
+        commands.append(command)
+        if "-cert-file" in command:
+            cert_file = Path(command[command.index("-cert-file") + 1])
+            key_file = Path(command[command.index("-key-file") + 1])
+            cert_file.write_text("cert", encoding="utf-8")
+            key_file.write_text("key", encoding="utf-8")
+
+    monkeypatch.setattr("streamlit_remote.https.run_mkcert", fake_run_mkcert)
+
+    prepare_mkcert_material("localhost", cache_dir=tmp_path, mkcert_binary=mkcert_binary)
+
+    assert commands[0] == [str(mkcert_binary), "-install"]
+    assert commands[1][0] == str(mkcert_binary)
+
+
 def test_prepare_mkcert_material_reuses_existing_cert(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -149,3 +177,17 @@ def test_prepare_mkcert_material_reports_missing_mkcert(
 
     with pytest.raises(HttpsError, match="mkcert was not found"):
         prepare_mkcert_material("localhost", cache_dir=tmp_path)
+
+
+def test_prepare_mkcert_material_reports_missing_custom_binary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("streamlit_remote.https.shutil.which", lambda name: None)
+
+    with pytest.raises(HttpsError, match="configured path"):
+        prepare_mkcert_material(
+            "localhost",
+            cache_dir=tmp_path,
+            mkcert_binary=tmp_path / "missing-mkcert",
+        )
