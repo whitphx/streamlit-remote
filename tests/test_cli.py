@@ -16,7 +16,7 @@ def test_parse_args_accepts_streamlit_args_after_separator() -> None:
     assert namespace.app == Path("app.py")
     assert namespace.port == 9000
     assert namespace.streamlit_args == ["--server.headless", "true"]
-    assert namespace.developer_mode
+    assert namespace.toolbar_mode == "developer"
     assert not namespace.no_browser
 
 
@@ -46,12 +46,12 @@ def test_build_streamlit_command() -> None:
     ]
 
 
-def test_build_streamlit_command_without_developer_mode() -> None:
+def test_build_streamlit_command_with_viewer_toolbar_mode() -> None:
     command = cli.build_streamlit_command(
         Path("app.py"),
         "127.0.0.1",
         8501,
-        developer_mode=False,
+        toolbar_mode="viewer",
     )
 
     assert "--client.toolbarMode" in command
@@ -123,18 +123,18 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     assert "cloudflared tunnel --url http://localhost:8501" in captured.out
 
 
-def test_run_cli_dry_run_can_disable_developer_mode(
+def test_run_cli_dry_run_can_set_toolbar_mode(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--no-developer-mode"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--toolbar-mode", "minimal"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "--client.toolbarMode viewer" in captured.out
+    assert "--client.toolbarMode minimal" in captured.out
 
 
 def test_run_cli_dry_run_uses_custom_cloudflared_binary(
