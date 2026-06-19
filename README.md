@@ -49,12 +49,15 @@ st-remote app.py --provider ngrok --ngrok-binary /path/to/ngrok
 st-remote app.py --provider ngrok --tunnel-log-level warn
 st-remote app.py --provider ngrok --remote-auth oauth --oauth-provider google
 st-remote app.py --provider ngrok --ngrok-traffic-policy-file policy.yml
+st-remote app.py --no-developer-mode
 st-remote app.py -- --server.headless true
 ```
 
 Extra arguments after `--` are passed to `python -m streamlit run`.
 
 `st-remote` starts Streamlit in headless mode so Streamlit does not open the local URL automatically. When remote access is enabled, `st-remote` opens the detected remote HTTPS URL instead. Use `--no-browser` to suppress browser opening.
+
+`st-remote` also forces Streamlit's toolbar into developer mode by default so controls such as rerun and clear cache remain visible through remote proxy hostnames. Use `--no-developer-mode` to hide those developer toolbar actions.
 
 ## Local HTTPS
 

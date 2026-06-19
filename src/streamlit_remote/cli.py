@@ -99,6 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra argument passed to Streamlit. Can be repeated.",
     )
     parser.add_argument(
+        "--no-developer-mode",
+        dest="developer_mode",
+        action="store_false",
+        default=True,
+        help="Hide Streamlit developer toolbar actions such as rerun and clear cache.",
+    )
+    parser.add_argument(
         "--remote-auth",
         default="off",
         choices=["off", "oauth"],
@@ -160,6 +167,7 @@ def build_streamlit_command(
     port: int,
     streamlit_args: Sequence[str] = (),
     https_material: HttpsMaterial | None = None,
+    developer_mode: bool = True,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -173,6 +181,8 @@ def build_streamlit_command(
         str(port),
         "--server.headless",
         "true",
+        "--client.toolbarMode",
+        "developer" if developer_mode else "viewer",
     ]
 
     if https_material is not None:
@@ -303,6 +313,7 @@ def run(namespace: argparse.Namespace) -> int:
             local_server.port,
             namespace.streamlit_args,
             https_material=https_material,
+            developer_mode=namespace.developer_mode,
         )
         print(f"Streamlit command:\n  {shlex.join(streamlit_command)}")
         if tunnel_command is None:
@@ -330,6 +341,7 @@ def run(namespace: argparse.Namespace) -> int:
         local_server.port,
         namespace.streamlit_args,
         https_material=https_material,
+        developer_mode=namespace.developer_mode,
     )
     if provider is not None:
         tunnel_command = provider.build_command(
