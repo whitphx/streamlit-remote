@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -568,6 +570,59 @@ def test_open_browser_uses_webbrowser(monkeypatch: pytest.MonkeyPatch) -> None:
     assert opened == [("https://example.test", 2)]
 
 
+def test_restart_shortcut_listener_sets_restart_event() -> None:
+    class TtyInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    restart_requested = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    thread = cli.start_restart_shortcut_listener(
+        restart_requested,
+        stop_requested,
+        input_stream=TtyInput("r\n"),
+    )
+
+    assert thread is not None
+    thread.join(timeout=1.0)
+    assert restart_requested.is_set()
+
+
+def test_restart_shortcut_listener_ignores_non_tty_input() -> None:
+    thread = cli.start_restart_shortcut_listener(
+        cli.threading.Event(),
+        cli.threading.Event(),
+        input_stream=StringIO("r\n"),
+    )
+
+    assert thread is None
+
+
+def test_supervise_processes_restarts_only_streamlit() -> None:
+    restart_requested = cli.threading.Event()
+    restart_requested.set()
+    restarted: list[str] = []
+    tunnel_handle = make_process_handle("tunnel", poll_results=[None])
+    restarted_streamlit = make_process_handle("streamlit", returncode=0, poll_results=[0])
+
+    def restart_streamlit(handle: cli.ManagedProcess) -> cli.ManagedProcess:
+        restarted.append(handle.prefix)
+        return restarted_streamlit
+
+    exit_code = cli.supervise_processes(
+        make_process_handle("streamlit", poll_results=[None]),
+        tunnel_handle,
+        restart_requested,
+        restart_streamlit,
+        poll_interval=0,
+    )
+
+    assert exit_code == 0
+    assert restarted == ["streamlit"]
+    assert tunnel_handle.process.poll() is None
+
+
 def test_run_no_remote_opens_local_https_url(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -636,3 +691,33 @@ def test_run_no_remote_no_browser_does_not_open_local_url(
 
     assert exit_code == 0
     assert opened == []
+
+
+def make_process_handle(
+    prefix: str,
+    *,
+    returncode: int | None = None,
+    poll_results: list[int | None],
+) -> cli.ManagedProcess:
+    results = poll_results.copy()
+
+    def poll() -> int | None:
+        if len(results) > 1:
+            return results.pop(0)
+        return results[0]
+
+    process = SimpleNamespace(
+        returncode=returncode,
+        poll=poll,
+        terminate=lambda: None,
+        wait=lambda timeout=None: returncode,
+        kill=lambda: None,
+    )
+    return cast(
+        cli.ManagedProcess,
+        SimpleNamespace(
+            process=process,
+            prefix=prefix,
+            output_thread=SimpleNamespace(join=lambda timeout=None: None),
+        ),
+    )

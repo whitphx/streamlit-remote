@@ -59,6 +59,12 @@ Extra arguments after `--` are passed to `python -m streamlit run`.
 
 `st-remote` also sets Streamlit's toolbar mode to `developer` by default so controls such as rerun and clear cache remain visible through remote proxy hostnames. Use `--toolbar-mode viewer` to hide those developer toolbar actions, or `--toolbar-mode auto` to use Streamlit's default hostname-sensitive behavior.
 
+## Runtime Shortcuts
+
+In an interactive terminal, enter `r` and press Enter to restart only the Streamlit server while keeping the remote tunnel process running. This keeps the current tunnel session alive, so providers such as Cloudflare Quick Tunnel and ngrok can continue serving the same public URL while Streamlit restarts behind it.
+
+Use Ctrl+C to stop both Streamlit and the remote tunnel.
+
 ## Local HTTPS
 
 By default, Streamlit runs locally over HTTP:
