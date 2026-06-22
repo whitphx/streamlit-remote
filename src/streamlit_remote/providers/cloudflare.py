@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-
-from streamlit_remote.providers.executables import is_executable_available
 
 TRYCLOUDFLARE_URL_RE = re.compile(r"https://[A-Za-z0-9-]+\.trycloudflare\.com\b")
 
@@ -50,4 +49,4 @@ class CloudflareQuickTunnelProvider:
         return None
 
     def is_available(self) -> bool:
-        return is_executable_available(self.executable)
+        return shutil.which(str(self.executable)) is not None

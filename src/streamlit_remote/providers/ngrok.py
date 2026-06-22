@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import urlopen
-
-from streamlit_remote.providers.executables import is_executable_available
 
 HTTPS_URL_RE = re.compile(r"https://[^\s]+")
 AGENT_API_TUNNELS_URL = "http://127.0.0.1:4040/api/tunnels"
@@ -81,7 +80,7 @@ class NgrokProvider:
         return parse_agent_api_public_url(payload)
 
     def is_available(self) -> bool:
-        return is_executable_available(self.executable)
+        return shutil.which(str(self.executable)) is not None
 
 
 @dataclass
