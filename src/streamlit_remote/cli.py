@@ -7,9 +7,10 @@ import sys
 import threading
 import time
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
+from typing import TextIO
 
 from streamlit_remote.https import (
     HttpsError,
@@ -22,7 +23,6 @@ from streamlit_remote.process import (
     ManagedProcess,
     start_logged_process,
     terminate_processes,
-    wait_for_process_exit,
 )
 from streamlit_remote.providers import get_provider
 from streamlit_remote.providers.ngrok import (
@@ -401,10 +401,28 @@ def run(namespace: argparse.Namespace) -> int:
                 return
             time.sleep(0.5)
 
-    handles: list[ManagedProcess] = []
+    streamlit_handle: ManagedProcess | None = None
+    tunnel_handle: ManagedProcess | None = None
     public_url_poll_thread: threading.Thread | None = None
+    shortcut_stop_requested = threading.Event()
+    restart_requested = threading.Event()
+
+    def start_streamlit_process() -> ManagedProcess:
+        return start_logged_process(streamlit_command, "streamlit")
+
+    def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
+        print("\nRestarting Streamlit...")
+        terminate_processes([current_handle])
+        next_handle = start_streamlit_process()
+        if not wait_until_listening(local_server.host, local_server.port):
+            print(
+                f"error: Streamlit did not start listening on {local_server.url} after restart.",
+                file=sys.stderr,
+            )
+        return next_handle
+
     try:
-        handles.append(start_logged_process(streamlit_command, "streamlit"))
+        streamlit_handle = start_streamlit_process()
         if tunnel_command is not None and not wait_until_listening(
             local_server.host,
             local_server.port,
@@ -415,16 +433,14 @@ def run(namespace: argparse.Namespace) -> int:
 
         if tunnel_command is not None:
             assert provider is not None
-            handles.append(
-                start_logged_process(
-                    tunnel_command,
-                    provider.log_prefix,
-                    on_line=on_tunnel_line,
-                    should_print_line=lambda line: should_print_tunnel_line(
-                        line,
-                        namespace.tunnel_log_level,
-                    ),
-                )
+            tunnel_handle = start_logged_process(
+                tunnel_command,
+                provider.log_prefix,
+                on_line=on_tunnel_line,
+                should_print_line=lambda line: should_print_tunnel_line(
+                    line,
+                    namespace.tunnel_log_level,
+                ),
             )
             public_url_poll_thread = threading.Thread(
                 target=poll_provider_public_url,
@@ -433,13 +449,32 @@ def run(namespace: argparse.Namespace) -> int:
             )
             public_url_poll_thread.start()
 
-        exited = wait_for_process_exit(handles)
-        return exited.process.returncode if exited.process.returncode is not None else 1
+        shortcut_thread = start_restart_shortcut_listener(
+            restart_requested,
+            shortcut_stop_requested,
+        )
+        if shortcut_thread is not None:
+            print("\nRuntime shortcuts:")
+            print("  r + Enter: restart Streamlit while keeping the tunnel running")
+
+        def restart_and_track(current_handle: ManagedProcess) -> ManagedProcess:
+            nonlocal streamlit_handle
+            streamlit_handle = restart_streamlit_process(current_handle)
+            return streamlit_handle
+
+        return supervise_processes(
+            streamlit_handle,
+            tunnel_handle,
+            restart_requested,
+            restart_and_track,
+        )
     except KeyboardInterrupt:
         print("\nInterrupted. Shutting down child processes...", file=sys.stderr)
         return 130
     finally:
+        shortcut_stop_requested.set()
         remote_url_printed.set()
+        handles = [handle for handle in (streamlit_handle, tunnel_handle) if handle is not None]
         terminate_processes(handles)
         if public_url_poll_thread is not None:
             public_url_poll_thread.join(timeout=1.0)
@@ -453,6 +488,64 @@ def main() -> None:
 
 class CliError(Exception):
     pass
+
+
+def start_restart_shortcut_listener(
+    restart_requested: threading.Event,
+    stop_requested: threading.Event,
+    input_stream: TextIO | None = None,
+) -> threading.Thread | None:
+    stdin = sys.stdin if input_stream is None else input_stream
+    if not stdin.isatty():
+        return None
+
+    def listen() -> None:
+        while not stop_requested.is_set():
+            try:
+                line = stdin.readline()
+            except OSError:
+                return
+            if line == "":
+                return
+            if line.strip().lower() in {"r", "restart"}:
+                restart_requested.set()
+
+    thread = threading.Thread(
+        target=listen,
+        name="streamlit-remote-shortcuts",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def supervise_processes(
+    streamlit_handle: ManagedProcess,
+    tunnel_handle: ManagedProcess | None,
+    restart_requested: threading.Event,
+    restart_streamlit: Callable[[ManagedProcess], ManagedProcess],
+    poll_interval: float = 0.2,
+) -> int:
+    current_streamlit_handle = streamlit_handle
+    while True:
+        if restart_requested.is_set():
+            restart_requested.clear()
+            current_streamlit_handle = restart_streamlit(current_streamlit_handle)
+            continue
+
+        if tunnel_handle is not None and tunnel_handle.process.poll() is not None:
+            if tunnel_handle.process.returncode is not None:
+                return tunnel_handle.process.returncode
+            return 1
+
+        if current_streamlit_handle.process.poll() is not None:
+            return (
+                current_streamlit_handle.process.returncode
+                if current_streamlit_handle.process.returncode is not None
+                else 1
+            )
+
+        time.sleep(poll_interval)
 
 
 def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial | None:
