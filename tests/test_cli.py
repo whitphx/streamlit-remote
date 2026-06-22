@@ -16,6 +16,7 @@ def test_parse_args_accepts_streamlit_args_after_separator() -> None:
     assert namespace.app == Path("app.py")
     assert namespace.port == 9000
     assert namespace.streamlit_args == ["--server.headless", "true"]
+    assert namespace.toolbar_mode == "developer"
     assert not namespace.no_browser
 
 
@@ -38,9 +39,34 @@ def test_build_streamlit_command() -> None:
         "8501",
         "--server.headless",
         "true",
+        "--client.toolbarMode",
+        "developer",
         "--server.runOnSave",
         "true",
     ]
+
+
+def test_build_streamlit_command_with_viewer_toolbar_mode() -> None:
+    command = cli.build_streamlit_command(
+        Path("app.py"),
+        "127.0.0.1",
+        8501,
+        toolbar_mode="viewer",
+    )
+
+    assert "--client.toolbarMode" in command
+    assert command[command.index("--client.toolbarMode") + 1] == "viewer"
+
+
+def test_streamlit_args_can_override_default_toolbar_mode() -> None:
+    command = cli.build_streamlit_command(
+        Path("app.py"),
+        "127.0.0.1",
+        8501,
+        ["--client.toolbarMode", "auto"],
+    )
+
+    assert command[-2:] == ["--client.toolbarMode", "auto"]
 
 
 def test_build_streamlit_command_with_https_material(tmp_path: Path) -> None:
@@ -59,6 +85,7 @@ def test_build_streamlit_command_with_https_material(tmp_path: Path) -> None:
     assert "--server.sslKeyFile" in command
     assert str(key_file) in command
     assert command.count("--server.headless") == 1
+    assert command.count("--client.toolbarMode") == 1
 
 
 def test_run_cli_rejects_missing_app(capsys: pytest.CaptureFixture[str]) -> None:
@@ -92,7 +119,22 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Streamlit command:" in captured.out
+    assert "--client.toolbarMode developer" in captured.out
     assert "cloudflared tunnel --url http://localhost:8501" in captured.out
+
+
+def test_run_cli_dry_run_can_set_toolbar_mode(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--toolbar-mode", "minimal"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "--client.toolbarMode minimal" in captured.out
 
 
 def test_run_cli_dry_run_uses_custom_cloudflared_binary(
