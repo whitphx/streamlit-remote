@@ -2,6 +2,15 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.4.1'></a>
+## 0.4.1 — 2026-06-22
+
+### Fixed
+
+- Kept Streamlit developer toolbar controls enabled through remote proxy URLs by default, with a new `--toolbar-mode` option for choosing Streamlit's toolbar behavior.
+
+- Fixed tunnel provider binary detection for symlinked `cloudflared` and `ngrok` commands.
+
 <a id='changelog-0.4.0'></a>
 ## 0.4.0 — 2026-06-10
 
