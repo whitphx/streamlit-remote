@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.5.0'></a>
+## 0.5.0 — 2026-06-22
+
+### Added
+
+- Added an interactive `r` + Enter shortcut to restart only the Streamlit server while keeping the remote tunnel running.
+
 <a id='changelog-0.4.1'></a>
 ## 0.4.1 — 2026-06-22
 
