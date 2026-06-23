@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "cryptography>=42",
+    "rich>=15.0.0",
     "streamlit>=1.28",
 ]
 

@@ -39,6 +39,7 @@ st-remote app.py --port 9000
 st-remote app.py --host 0.0.0.0
 st-remote app.py --no-remote
 st-remote app.py --no-browser
+st-remote app.py --no-tui
 st-remote app.py --dry-run
 st-remote app.py --https self-signed --no-remote
 st-remote app.py --https mkcert --no-remote
@@ -59,9 +60,13 @@ Extra arguments after `--` are passed to `python -m streamlit run`.
 
 `st-remote` also sets Streamlit's toolbar mode to `developer` by default so controls such as rerun and clear cache remain visible through remote proxy hostnames. Use `--toolbar-mode viewer` to hide those developer toolbar actions, or `--toolbar-mode auto` to use Streamlit's default hostname-sensitive behavior.
 
-## Runtime Shortcuts
+## Runtime Display and Shortcuts
 
-In an interactive terminal, enter `r` and press Enter to restart only the Streamlit server while keeping the remote tunnel process running. This keeps the current tunnel session alive, so providers such as Cloudflare Quick Tunnel and ngrok can continue serving the same public URL while Streamlit restarts behind it.
+In an interactive terminal, `st-remote` shows a live terminal display with local and remote URLs, process statuses, recent logs, and shortcut help. Use `--no-tui` to keep plain prefixed log output from startup.
+
+Enter `r` and press Enter to restart only the Streamlit server while keeping the remote tunnel process running. This keeps the current tunnel session alive, so providers such as Cloudflare Quick Tunnel and ngrok can continue serving the same public URL while Streamlit restarts behind it.
+
+Enter `t` and press Enter to leave the live terminal display, replay recent logs into the normal terminal buffer, and continue with plain prefixed log output. This is useful when you need to copy older logs from terminal or tmux history.
 
 Use Ctrl+C to stop both Streamlit and the remote tunnel.
 

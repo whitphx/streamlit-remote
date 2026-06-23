@@ -1,0 +1,369 @@
+from __future__ import annotations
+
+import sys
+import threading
+from collections import deque
+from typing import Protocol, TextIO
+
+from rich.console import Console, RenderableType
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+
+class RuntimeDisplay(Protocol):
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def switch_to_plain(self) -> bool: ...
+
+    def set_local_url(self, url: str) -> None: ...
+
+    def set_remote_url(self, url: str) -> None: ...
+
+    def set_status(self, component: str, status: str) -> None: ...
+
+    def set_shortcuts_visible(self, visible: bool) -> None: ...
+
+    def info(self, message: str) -> None: ...
+
+    def error(self, message: str) -> None: ...
+
+    def log(self, source: str, line: str) -> None: ...
+
+
+class PlainRuntimeDisplay(RuntimeDisplay):
+    def __init__(self, output: TextIO = sys.stdout, error_output: TextIO = sys.stderr) -> None:
+        self._output = output
+        self._error_output = error_output
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def switch_to_plain(self) -> bool:
+        return False
+
+    def set_local_url(self, url: str) -> None:
+        self.info("Streamlit local URL:")
+        self.info(f"  {url}")
+
+    def set_remote_url(self, url: str) -> None:
+        self.info("Remote HTTPS URL:")
+        self.info(f"  {url}")
+
+    def set_status(self, component: str, status: str) -> None:
+        pass
+
+    def set_shortcuts_visible(self, visible: bool) -> None:
+        if visible:
+            self.info("Runtime shortcuts:")
+            self.info("  r + Enter: restart Streamlit while keeping the tunnel running")
+
+    def info(self, message: str) -> None:
+        print(message, file=self._output, flush=True)
+
+    def error(self, message: str) -> None:
+        print(message, file=self._error_output, flush=True)
+
+    def log(self, source: str, line: str) -> None:
+        print(f"[{source}] {line}", file=self._output, flush=True)
+
+
+class RichRuntimeDisplay(RuntimeDisplay):
+    _MIN_LOG_PANEL_HEIGHT = 3
+    _SHORTCUTS_PANEL_HEIGHT = 3
+    _PANEL_FRAME_ROWS = 2
+    _PANEL_HORIZONTAL_OVERHEAD = 4
+    _LOG_SOURCE_WIDTH = 11
+    _LOG_SOURCE_SEPARATOR_WIDTH = 1
+
+    def __init__(
+        self,
+        console: Console | None = None,
+        max_log_lines: int = 120,
+    ) -> None:
+        self._console = console or Console()
+        self._logs: deque[tuple[str, str]] = deque(maxlen=max_log_lines)
+        self._statuses: dict[str, str] = {}
+        self._local_url: str | None = None
+        self._remote_url: str | None = None
+        self._shortcuts_visible = False
+        self._live: Live | None = None
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        with self._lock:
+            if self._live is not None:
+                return
+            self._live = Live(
+                self._render(),
+                console=self._console,
+                refresh_per_second=8,
+                screen=True,
+                transient=False,
+                vertical_overflow="crop",
+            )
+            self._live.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._live is None:
+                return
+            self._live.stop()
+            self._live = None
+
+    def switch_to_plain(self) -> bool:
+        return False
+
+    def set_local_url(self, url: str) -> None:
+        with self._lock:
+            self._local_url = url
+            self._refresh()
+
+    def set_remote_url(self, url: str) -> None:
+        with self._lock:
+            self._remote_url = url
+            self._refresh()
+
+    def set_status(self, component: str, status: str) -> None:
+        with self._lock:
+            self._statuses[component] = status
+            self._refresh()
+
+    def set_shortcuts_visible(self, visible: bool) -> None:
+        with self._lock:
+            self._shortcuts_visible = visible
+            self._refresh()
+
+    def info(self, message: str) -> None:
+        self.log("st-remote", message)
+
+    def error(self, message: str) -> None:
+        self.log("error", message)
+
+    def log(self, source: str, line: str) -> None:
+        with self._lock:
+            self._logs.append((source, line))
+            self._refresh()
+
+    def _refresh(self) -> None:
+        if self._live is not None:
+            self._live.update(self._render())
+
+    def _render(self) -> RenderableType:
+        status_height, log_height, shortcuts_height = self._layout_heights()
+        layout = Layout()
+        layout.split_column(
+            Layout(
+                self._render_status_panel(height=status_height),
+                size=status_height,
+            ),
+            Layout(
+                self._render_log_panel(height=log_height),
+                size=log_height,
+            ),
+            Layout(
+                self._render_shortcuts_panel(height=shortcuts_height),
+                size=shortcuts_height,
+            ),
+        )
+        return layout
+
+    def _layout_heights(self) -> tuple[int, int, int]:
+        terminal_height = max(
+            self._MIN_LOG_PANEL_HEIGHT + self._SHORTCUTS_PANEL_HEIGHT + 3,
+            self._console.size.height,
+        )
+        max_status_height = (
+            terminal_height - self._SHORTCUTS_PANEL_HEIGHT - self._MIN_LOG_PANEL_HEIGHT
+        )
+        status_height = min(max(4, len(self._statuses) + 4), max_status_height)
+        log_height = terminal_height - status_height - self._SHORTCUTS_PANEL_HEIGHT
+        return status_height, log_height, self._SHORTCUTS_PANEL_HEIGHT
+
+    def _render_status_panel(self, *, height: int | None = None) -> Panel:
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold")
+        table.add_column()
+        table.add_row("Local", self._local_url or "pending")
+        table.add_row("Remote", self._remote_url or "pending")
+        for component, status in self._statuses.items():
+            table.add_row(component, status)
+        return Panel(table, title="streamlit-remote", border_style="cyan", height=height)
+
+    def _render_log_panel(self, *, height: int | None = None) -> Panel:
+        panel_height = height or self._layout_heights()[1]
+        if not self._logs:
+            return Panel(
+                Text("Waiting for logs...", style="dim"),
+                title="Logs",
+                height=panel_height,
+            )
+
+        lines = Text()
+        visible_logs = self._visible_logs(panel_height=panel_height)
+        for index, (source, line) in enumerate(visible_logs):
+            lines.append(f"{source:>11} ", style=self._source_style(source))
+            lines.append(self._format_log_line(line))
+            if index < len(visible_logs) - 1:
+                lines.append("\n")
+        return Panel(lines, title="Logs", height=panel_height)
+
+    def _visible_logs(self, *, panel_height: int | None = None) -> list[tuple[str, str]]:
+        log_panel_height = panel_height or self._layout_heights()[1]
+        available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
+        return list(self._logs)[-available_rows:]
+
+    def _format_log_line(self, line: str) -> str:
+        line = line.replace("\n", r"\n").replace("\r", r"\r")
+        line_width = self._log_line_width()
+        if len(line) <= line_width:
+            return line
+        if line_width <= 3:
+            return "." * line_width
+        return f"{line[: line_width - 3]}..."
+
+    def _log_line_width(self) -> int:
+        content_width = self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD
+        return max(
+            1,
+            content_width - self._LOG_SOURCE_WIDTH - self._LOG_SOURCE_SEPARATOR_WIDTH,
+        )
+
+    def _render_shortcuts_panel(self, *, height: int | None = None) -> Panel:
+        if not self._shortcuts_visible:
+            return Panel(
+                Text("Ctrl+C stop all", style="bold"),
+                title="Shortcuts",
+                height=height,
+            )
+
+        shortcuts = Text()
+        shortcuts.append("r + Enter", style="bold green")
+        shortcuts.append(" restart Streamlit   ")
+        shortcuts.append("t + Enter", style="bold cyan")
+        shortcuts.append(" plain logs   ")
+        shortcuts.append("Ctrl+C", style="bold red")
+        shortcuts.append(" stop all")
+        return Panel(shortcuts, title="Shortcuts", border_style="green", height=height)
+
+    def _source_style(self, source: str) -> str:
+        if source == "streamlit":
+            return "blue"
+        if source in {"cloudflared", "ngrok"}:
+            return "magenta"
+        if source == "error":
+            return "red"
+        return "cyan"
+
+
+class SwitchableRuntimeDisplay(RuntimeDisplay):
+    def __init__(
+        self,
+        rich_display: RichRuntimeDisplay,
+        plain_display: PlainRuntimeDisplay,
+        max_replayed_logs: int = 120,
+    ) -> None:
+        self._rich_display = rich_display
+        self._plain_display = plain_display
+        self._active_display: RuntimeDisplay = rich_display
+        self._logs: deque[tuple[str, str]] = deque(maxlen=max_replayed_logs)
+        self._statuses: dict[str, str] = {}
+        self._local_url: str | None = None
+        self._remote_url: str | None = None
+        self._shortcuts_visible = False
+        self._started = False
+        self._lock = threading.RLock()
+
+    def start(self) -> None:
+        with self._lock:
+            if self._started:
+                return
+            self._started = True
+            self._active_display.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            if not self._started:
+                return
+            self._active_display.stop()
+            self._started = False
+
+    def switch_to_plain(self) -> bool:
+        with self._lock:
+            if self._active_display is self._plain_display:
+                return False
+
+            was_started = self._started
+            if was_started:
+                self._rich_display.stop()
+            self._active_display = self._plain_display
+            if was_started:
+                self._plain_display.start()
+
+            if self._local_url is not None:
+                self._plain_display.set_local_url(self._local_url)
+            if self._remote_url is not None:
+                self._plain_display.set_remote_url(self._remote_url)
+            if self._shortcuts_visible:
+                self._plain_display.set_shortcuts_visible(True)
+
+            self._plain_display.info("Switched to plain log output. Recent logs:")
+            for source, line in self._logs:
+                self._plain_display.log(source, line)
+            return True
+
+    def set_local_url(self, url: str) -> None:
+        with self._lock:
+            self._local_url = url
+            self._active_display.set_local_url(url)
+
+    def set_remote_url(self, url: str) -> None:
+        with self._lock:
+            self._remote_url = url
+            self._active_display.set_remote_url(url)
+
+    def set_status(self, component: str, status: str) -> None:
+        with self._lock:
+            self._statuses[component] = status
+            self._active_display.set_status(component, status)
+
+    def set_shortcuts_visible(self, visible: bool) -> None:
+        with self._lock:
+            self._shortcuts_visible = visible
+            self._active_display.set_shortcuts_visible(visible)
+
+    def info(self, message: str) -> None:
+        with self._lock:
+            self._logs.append(("st-remote", message))
+            self._active_display.info(message)
+
+    def error(self, message: str) -> None:
+        with self._lock:
+            self._logs.append(("error", message))
+            self._active_display.error(message)
+
+    def log(self, source: str, line: str) -> None:
+        with self._lock:
+            self._logs.append((source, line))
+            self._active_display.log(source, line)
+
+
+def make_runtime_display(
+    *,
+    use_tui: bool,
+    output: TextIO = sys.stdout,
+    error_output: TextIO = sys.stderr,
+) -> RuntimeDisplay:
+    if use_tui:
+        return SwitchableRuntimeDisplay(
+            RichRuntimeDisplay(Console(file=output)),
+            PlainRuntimeDisplay(output=output, error_output=error_output),
+        )
+    return PlainRuntimeDisplay(output=output, error_output=error_output)
