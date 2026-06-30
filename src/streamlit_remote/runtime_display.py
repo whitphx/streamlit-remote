@@ -20,6 +20,10 @@ class RuntimeDisplay(Protocol):
 
     def switch_to_plain(self) -> bool: ...
 
+    def switch_to_rich(self) -> bool: ...
+
+    def toggle_display(self) -> bool: ...
+
     def set_local_url(self, url: str) -> None: ...
 
     def set_remote_url(self, url: str) -> None: ...
@@ -47,6 +51,12 @@ class PlainRuntimeDisplay(RuntimeDisplay):
         pass
 
     def switch_to_plain(self) -> bool:
+        return False
+
+    def switch_to_rich(self) -> bool:
+        return False
+
+    def toggle_display(self) -> bool:
         return False
 
     def set_local_url(self, url: str) -> None:
@@ -121,6 +131,12 @@ class RichRuntimeDisplay(RuntimeDisplay):
     def switch_to_plain(self) -> bool:
         return False
 
+    def switch_to_rich(self) -> bool:
+        return False
+
+    def toggle_display(self) -> bool:
+        return False
+
     def set_local_url(self, url: str) -> None:
         with self._lock:
             self._local_url = url
@@ -150,6 +166,24 @@ class RichRuntimeDisplay(RuntimeDisplay):
     def log(self, source: str, line: str) -> None:
         with self._lock:
             self._logs.append((source, line))
+            self._refresh()
+
+    def set_state(
+        self,
+        *,
+        local_url: str | None,
+        remote_url: str | None,
+        statuses: dict[str, str],
+        shortcuts_visible: bool,
+        logs: list[tuple[str, str]],
+    ) -> None:
+        with self._lock:
+            self._local_url = local_url
+            self._remote_url = remote_url
+            self._statuses = statuses.copy()
+            self._shortcuts_visible = shortcuts_visible
+            self._logs.clear()
+            self._logs.extend(logs)
             self._refresh()
 
     def _refresh(self) -> None:
@@ -248,7 +282,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         shortcuts.append("r + Enter", style="bold green")
         shortcuts.append(" restart Streamlit   ")
         shortcuts.append("t + Enter", style="bold cyan")
-        shortcuts.append(" plain logs   ")
+        shortcuts.append(" toggle display   ")
         shortcuts.append("Ctrl+C", style="bold red")
         shortcuts.append(" stop all")
         return Panel(shortcuts, title="Shortcuts", border_style="green", height=height)
@@ -315,9 +349,37 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
                 self._plain_display.set_shortcuts_visible(True)
 
             self._plain_display.info("Switched to plain log output. Recent logs:")
+            self._plain_display.info("  t + Enter: return to terminal display")
             for source, line in self._logs:
                 self._plain_display.log(source, line)
             return True
+
+    def switch_to_rich(self) -> bool:
+        with self._lock:
+            if self._active_display is self._rich_display:
+                return False
+
+            self._rich_display.set_state(
+                local_url=self._local_url,
+                remote_url=self._remote_url,
+                statuses=self._statuses,
+                shortcuts_visible=self._shortcuts_visible,
+                logs=list(self._logs),
+            )
+
+            was_started = self._started
+            if was_started:
+                self._plain_display.stop()
+            self._active_display = self._rich_display
+            if was_started:
+                self._rich_display.start()
+            return True
+
+    def toggle_display(self) -> bool:
+        with self._lock:
+            if self._active_display is self._rich_display:
+                return self.switch_to_plain()
+            return self.switch_to_rich()
 
     def set_local_url(self, url: str) -> None:
         with self._lock:

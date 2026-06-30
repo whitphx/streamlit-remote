@@ -415,7 +415,9 @@ def run(namespace: argparse.Namespace) -> int:
     public_url_poll_thread: threading.Thread | None = None
     shortcut_stop_requested = threading.Event()
     restart_requested = threading.Event()
+    display_toggle_requested = threading.Event()
     plain_output_requested = threading.Event()
+    rich_output_requested = threading.Event()
 
     def start_streamlit_process() -> ManagedProcess:
         display.set_status("Streamlit", "starting")
@@ -469,7 +471,9 @@ def run(namespace: argparse.Namespace) -> int:
         shortcut_thread = start_restart_shortcut_listener(
             restart_requested,
             shortcut_stop_requested,
+            display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
+            rich_output_requested=rich_output_requested,
         )
         if shortcut_thread is not None:
             display.set_shortcuts_visible(True)
@@ -484,8 +488,12 @@ def run(namespace: argparse.Namespace) -> int:
             tunnel_handle,
             restart_requested,
             restart_and_track,
+            display_toggle_requested=display_toggle_requested,
+            toggle_display=display.toggle_display,
             plain_output_requested=plain_output_requested,
             switch_to_plain=display.switch_to_plain,
+            rich_output_requested=rich_output_requested,
+            switch_to_rich=display.switch_to_rich,
         )
     except KeyboardInterrupt:
         display.error("Interrupted. Shutting down child processes...")
@@ -514,7 +522,9 @@ def start_restart_shortcut_listener(
     restart_requested: threading.Event,
     stop_requested: threading.Event,
     input_stream: TextIO | None = None,
+    display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
+    rich_output_requested: threading.Event | None = None,
 ) -> threading.Thread | None:
     stdin = sys.stdin if input_stream is None else input_stream
     if not stdin.isatty():
@@ -531,8 +541,12 @@ def start_restart_shortcut_listener(
             shortcut = line.strip().lower()
             if shortcut in {"r", "restart"}:
                 restart_requested.set()
-            elif plain_output_requested is not None and shortcut in {"t", "plain", "logs"}:
+            elif display_toggle_requested is not None and shortcut in {"t", "toggle"}:
+                display_toggle_requested.set()
+            elif plain_output_requested is not None and shortcut in {"plain", "logs"}:
                 plain_output_requested.set()
+            elif rich_output_requested is not None and shortcut in {"fancy", "tui"}:
+                rich_output_requested.set()
 
     thread = threading.Thread(
         target=listen,
@@ -549,8 +563,12 @@ def supervise_processes(
     restart_requested: threading.Event,
     restart_streamlit: Callable[[ManagedProcess], ManagedProcess],
     poll_interval: float = 0.2,
+    display_toggle_requested: threading.Event | None = None,
+    toggle_display: Callable[[], bool] | None = None,
     plain_output_requested: threading.Event | None = None,
     switch_to_plain: Callable[[], bool] | None = None,
+    rich_output_requested: threading.Event | None = None,
+    switch_to_rich: Callable[[], bool] | None = None,
 ) -> int:
     current_streamlit_handle = streamlit_handle
     while True:
@@ -559,10 +577,22 @@ def supervise_processes(
             current_streamlit_handle = restart_streamlit(current_streamlit_handle)
             continue
 
+        if display_toggle_requested is not None and display_toggle_requested.is_set():
+            display_toggle_requested.clear()
+            if toggle_display is not None:
+                toggle_display()
+            continue
+
         if plain_output_requested is not None and plain_output_requested.is_set():
             plain_output_requested.clear()
             if switch_to_plain is not None:
                 switch_to_plain()
+            continue
+
+        if rich_output_requested is not None and rich_output_requested.is_set():
+            rich_output_requested.clear()
+            if switch_to_rich is not None:
+                switch_to_rich()
             continue
 
         if tunnel_handle is not None and tunnel_handle.process.poll() is not None:

@@ -44,8 +44,9 @@ def test_plain_runtime_display_writes_log_and_shortcut_help() -> None:
 
 def test_switchable_runtime_display_replays_recent_logs_in_plain_output() -> None:
     plain_output = StringIO()
+    rich_display = RichRuntimeDisplay(console=Console(file=StringIO()))
     display = SwitchableRuntimeDisplay(
-        RichRuntimeDisplay(console=Console(file=StringIO())),
+        rich_display,
         PlainRuntimeDisplay(output=plain_output, error_output=plain_output),
     )
 
@@ -54,17 +55,23 @@ def test_switchable_runtime_display_replays_recent_logs_in_plain_output() -> Non
     display.set_shortcuts_visible(True)
     display.log("streamlit", "ready")
 
-    assert display.switch_to_plain()
+    assert display.toggle_display()
     assert not display.switch_to_plain()
     display.log("ngrok", "future")
+    assert display.toggle_display()
+    assert not display.switch_to_rich()
+    display.log("streamlit", "back in tui")
 
     rendered = plain_output.getvalue()
     assert "http://localhost:8501" in rendered
     assert "https://example.test" in rendered
     assert "r + Enter" in rendered
+    assert "t + Enter" in rendered
     assert "Switched to plain log output. Recent logs:" in rendered
     assert "[streamlit] ready" in rendered
     assert "[ngrok] future" in rendered
+    assert "back in tui" not in rendered
+    assert list(rich_display._logs)[-1] == ("streamlit", "back in tui")
 
 
 def test_rich_runtime_display_limits_visible_log_lines() -> None:

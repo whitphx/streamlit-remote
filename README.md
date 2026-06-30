@@ -66,7 +66,7 @@ In an interactive terminal, `st-remote` shows a live terminal display with local
 
 Enter `r` and press Enter to restart only the Streamlit server while keeping the remote tunnel process running. This keeps the current tunnel session alive, so providers such as Cloudflare Quick Tunnel and ngrok can continue serving the same public URL while Streamlit restarts behind it.
 
-Enter `t` and press Enter to leave the live terminal display, replay recent logs into the normal terminal buffer, and continue with plain prefixed log output. This is useful when you need to copy older logs from terminal or tmux history.
+Enter `t` and press Enter to toggle between the live terminal display and plain prefixed log output. When switching to plain output, `st-remote` replays recent logs into the normal terminal buffer so you can copy older logs from terminal or tmux history. You can also enter `plain` or `logs` to force plain output, and `fancy` or `tui` to force the live terminal display.
 
 Use Ctrl+C to stop both Streamlit and the remote tunnel.
 
