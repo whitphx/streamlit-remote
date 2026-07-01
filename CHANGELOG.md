@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.7.1'></a>
+## 0.7.1 — 2026-07-01
+
+### Fixed
+
+- Replayed recent logs in the normal terminal buffer when a child process exits with an error while the live terminal display is active.
+
 <a id='changelog-0.7.0'></a>
 ## 0.7.0 — 2026-07-01
 
