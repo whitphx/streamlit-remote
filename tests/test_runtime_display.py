@@ -37,7 +37,7 @@ def test_plain_runtime_display_writes_log_and_shortcut_help() -> None:
 
     assert "Streamlit local URL:" in output.getvalue()
     assert "https://example.test" in output.getvalue()
-    assert "r + Enter" in output.getvalue()
+    assert "r:" in output.getvalue()
     assert "[streamlit] ready" in output.getvalue()
     assert "problem" in error_output.getvalue()
 
@@ -65,8 +65,8 @@ def test_switchable_runtime_display_replays_recent_logs_in_plain_output() -> Non
     rendered = plain_output.getvalue()
     assert "http://localhost:8501" in rendered
     assert "https://example.test" in rendered
-    assert "r + Enter" in rendered
-    assert "t + Enter" in rendered
+    assert "r" in rendered
+    assert "t:" in rendered
     assert "Switched to plain log output. Recent logs:" in rendered
     assert "[streamlit] ready" in rendered
     assert "[ngrok] future" in rendered

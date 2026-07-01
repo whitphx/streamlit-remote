@@ -531,22 +531,24 @@ def start_restart_shortcut_listener(
         return None
 
     def listen() -> None:
-        while not stop_requested.is_set():
-            try:
-                line = stdin.readline()
-            except OSError:
-                return
-            if line == "":
-                return
-            shortcut = line.strip().lower()
-            if shortcut in {"r", "restart"}:
-                restart_requested.set()
-            elif display_toggle_requested is not None and shortcut in {"t", "toggle"}:
-                display_toggle_requested.set()
-            elif plain_output_requested is not None and shortcut in {"plain", "logs"}:
-                plain_output_requested.set()
-            elif rich_output_requested is not None and shortcut in {"fancy", "tui"}:
-                rich_output_requested.set()
+        if listen_for_cbreak_shortcuts(
+            stdin,
+            restart_requested,
+            stop_requested,
+            display_toggle_requested=display_toggle_requested,
+            plain_output_requested=plain_output_requested,
+            rich_output_requested=rich_output_requested,
+        ):
+            return
+
+        listen_for_line_shortcuts(
+            stdin,
+            restart_requested,
+            stop_requested,
+            display_toggle_requested=display_toggle_requested,
+            plain_output_requested=plain_output_requested,
+            rich_output_requested=rich_output_requested,
+        )
 
     thread = threading.Thread(
         target=listen,
@@ -555,6 +557,103 @@ def start_restart_shortcut_listener(
     )
     thread.start()
     return thread
+
+
+def listen_for_cbreak_shortcuts(
+    stdin: TextIO,
+    restart_requested: threading.Event,
+    stop_requested: threading.Event,
+    *,
+    display_toggle_requested: threading.Event | None = None,
+    plain_output_requested: threading.Event | None = None,
+    rich_output_requested: threading.Event | None = None,
+) -> bool:
+    try:
+        import select
+        import termios
+        import tty
+
+        fd = stdin.fileno()
+        previous_terminal_settings = termios.tcgetattr(fd)
+    except (ImportError, AttributeError, OSError):
+        return False
+
+    try:
+        try:
+            tty.setcbreak(fd)
+        except OSError:
+            termios.tcsetattr(fd, termios.TCSANOW, previous_terminal_settings)
+            return False
+
+        while not stop_requested.is_set():
+            try:
+                readable, _, _ = select.select([fd], [], [], 0.1)
+            except OSError:
+                return True
+            if not readable:
+                continue
+
+            try:
+                shortcut = stdin.read(1)
+            except OSError:
+                return True
+            if shortcut == "":
+                return True
+            dispatch_shortcut(
+                shortcut,
+                restart_requested,
+                display_toggle_requested=display_toggle_requested,
+                plain_output_requested=plain_output_requested,
+                rich_output_requested=rich_output_requested,
+            )
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, previous_terminal_settings)
+
+    return True
+
+
+def listen_for_line_shortcuts(
+    stdin: TextIO,
+    restart_requested: threading.Event,
+    stop_requested: threading.Event,
+    *,
+    display_toggle_requested: threading.Event | None = None,
+    plain_output_requested: threading.Event | None = None,
+    rich_output_requested: threading.Event | None = None,
+) -> None:
+    while not stop_requested.is_set():
+        try:
+            line = stdin.readline()
+        except OSError:
+            return
+        if line == "":
+            return
+        dispatch_shortcut(
+            line,
+            restart_requested,
+            display_toggle_requested=display_toggle_requested,
+            plain_output_requested=plain_output_requested,
+            rich_output_requested=rich_output_requested,
+        )
+
+
+def dispatch_shortcut(
+    shortcut: str,
+    restart_requested: threading.Event,
+    *,
+    display_toggle_requested: threading.Event | None = None,
+    plain_output_requested: threading.Event | None = None,
+    rich_output_requested: threading.Event | None = None,
+) -> None:
+    normalized = shortcut.strip().lower()
+    if normalized in {"r", "restart"}:
+        restart_requested.set()
+    elif display_toggle_requested is not None and normalized in {"t", "toggle"}:
+        display_toggle_requested.set()
+    elif plain_output_requested is not None and normalized in {"p", "plain", "logs"}:
+        plain_output_requested.set()
+    elif rich_output_requested is not None and normalized in {"f", "fancy", "tui"}:
+        rich_output_requested.set()
 
 
 def supervise_processes(
