@@ -797,6 +797,65 @@ def test_supervise_processes_switches_to_rich_output() -> None:
     assert not rich_output_requested.is_set()
 
 
+def test_supervise_processes_reports_streamlit_error_exit() -> None:
+    restart_requested = cli.threading.Event()
+    reported: list[tuple[str, int]] = []
+
+    exit_code = cli.supervise_processes(
+        make_process_handle("streamlit", returncode=7, poll_results=[7]),
+        None,
+        restart_requested,
+        lambda handle: handle,
+        poll_interval=0,
+        report_process_error=lambda handle, returncode: reported.append(
+            (handle.prefix, returncode)
+        ),
+    )
+
+    assert exit_code == 7
+    assert reported == [("streamlit", 7)]
+
+
+def test_supervise_processes_reports_tunnel_error_exit() -> None:
+    restart_requested = cli.threading.Event()
+    streamlit_handle = make_process_handle("streamlit", poll_results=[None])
+    tunnel_handle = make_process_handle("cloudflared", returncode=3, poll_results=[3])
+    reported: list[tuple[str, int]] = []
+
+    exit_code = cli.supervise_processes(
+        streamlit_handle,
+        tunnel_handle,
+        restart_requested,
+        lambda handle: handle,
+        poll_interval=0,
+        report_process_error=lambda handle, returncode: reported.append(
+            (handle.prefix, returncode)
+        ),
+    )
+
+    assert exit_code == 3
+    assert reported == [("cloudflared", 3)]
+
+
+def test_supervise_processes_does_not_report_successful_exit() -> None:
+    restart_requested = cli.threading.Event()
+    reported: list[tuple[str, int]] = []
+
+    exit_code = cli.supervise_processes(
+        make_process_handle("streamlit", returncode=0, poll_results=[0]),
+        None,
+        restart_requested,
+        lambda handle: handle,
+        poll_interval=0,
+        report_process_error=lambda handle, returncode: reported.append(
+            (handle.prefix, returncode)
+        ),
+    )
+
+    assert exit_code == 0
+    assert reported == []
+
+
 def test_run_no_remote_opens_local_https_url(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

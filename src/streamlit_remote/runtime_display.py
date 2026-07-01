@@ -24,6 +24,8 @@ class RuntimeDisplay(Protocol):
 
     def toggle_display(self) -> bool: ...
 
+    def report_process_exit(self, source: str, returncode: int) -> None: ...
+
     def set_local_url(self, url: str) -> None: ...
 
     def set_remote_url(self, url: str) -> None: ...
@@ -58,6 +60,9 @@ class PlainRuntimeDisplay(RuntimeDisplay):
 
     def toggle_display(self) -> bool:
         return False
+
+    def report_process_exit(self, source: str, returncode: int) -> None:
+        self.error(f"error: {source} exited with code {returncode}.")
 
     def set_local_url(self, url: str) -> None:
         self.info("Streamlit local URL:")
@@ -136,6 +141,9 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
     def toggle_display(self) -> bool:
         return False
+
+    def report_process_exit(self, source: str, returncode: int) -> None:
+        pass
 
     def set_local_url(self, url: str) -> None:
         with self._lock:
@@ -380,6 +388,24 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
             if self._active_display is self._rich_display:
                 return self.switch_to_plain()
             return self.switch_to_rich()
+
+    def report_process_exit(self, source: str, returncode: int) -> None:
+        with self._lock:
+            if self._active_display is self._plain_display:
+                self._plain_display.report_process_exit(source, returncode)
+                return
+
+            was_started = self._started
+            if was_started:
+                self._rich_display.stop()
+            self._active_display = self._plain_display
+            if was_started:
+                self._plain_display.start()
+
+            self._plain_display.report_process_exit(source, returncode)
+            self._plain_display.info("Recent logs:")
+            for log_source, line in self._logs:
+                self._plain_display.log(log_source, line)
 
     def set_local_url(self, url: str) -> None:
         with self._lock:

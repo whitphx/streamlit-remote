@@ -483,11 +483,15 @@ def run(namespace: argparse.Namespace) -> int:
             streamlit_handle = restart_streamlit_process(current_handle)
             return streamlit_handle
 
+        def report_process_error(handle: ManagedProcess, returncode: int) -> None:
+            display.report_process_exit(handle.prefix, returncode)
+
         return supervise_processes(
             streamlit_handle,
             tunnel_handle,
             restart_requested,
             restart_and_track,
+            report_process_error=report_process_error,
             display_toggle_requested=display_toggle_requested,
             toggle_display=display.toggle_display,
             plain_output_requested=plain_output_requested,
@@ -662,6 +666,7 @@ def supervise_processes(
     restart_requested: threading.Event,
     restart_streamlit: Callable[[ManagedProcess], ManagedProcess],
     poll_interval: float = 0.2,
+    report_process_error: Callable[[ManagedProcess, int], None] | None = None,
     display_toggle_requested: threading.Event | None = None,
     toggle_display: Callable[[], bool] | None = None,
     plain_output_requested: threading.Event | None = None,
@@ -695,18 +700,23 @@ def supervise_processes(
             continue
 
         if tunnel_handle is not None and tunnel_handle.process.poll() is not None:
-            if tunnel_handle.process.returncode is not None:
-                return tunnel_handle.process.returncode
-            return 1
+            return report_process_returncode(tunnel_handle, report_process_error)
 
         if current_streamlit_handle.process.poll() is not None:
-            return (
-                current_streamlit_handle.process.returncode
-                if current_streamlit_handle.process.returncode is not None
-                else 1
-            )
+            return report_process_returncode(current_streamlit_handle, report_process_error)
 
         time.sleep(poll_interval)
+
+
+def report_process_returncode(
+    handle: ManagedProcess,
+    report_process_error: Callable[[ManagedProcess, int], None] | None,
+) -> int:
+    returncode = handle.process.returncode if handle.process.returncode is not None else 1
+    if returncode != 0 and report_process_error is not None:
+        handle.output_thread.join(timeout=1.0)
+        report_process_error(handle, returncode)
+    return returncode
 
 
 def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial | None:
