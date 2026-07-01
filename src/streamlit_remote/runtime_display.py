@@ -73,7 +73,7 @@ class PlainRuntimeDisplay(RuntimeDisplay):
     def set_shortcuts_visible(self, visible: bool) -> None:
         if visible:
             self.info("Runtime shortcuts:")
-            self.info("  r + Enter: restart Streamlit while keeping the tunnel running")
+            self.info("  r: restart Streamlit while keeping the tunnel running")
 
     def info(self, message: str) -> None:
         print(message, file=self._output, flush=True)
@@ -279,9 +279,9 @@ class RichRuntimeDisplay(RuntimeDisplay):
             )
 
         shortcuts = Text()
-        shortcuts.append("r + Enter", style="bold green")
+        shortcuts.append("r", style="bold green")
         shortcuts.append(" restart Streamlit   ")
-        shortcuts.append("t + Enter", style="bold cyan")
+        shortcuts.append("t", style="bold cyan")
         shortcuts.append(" toggle display   ")
         shortcuts.append("Ctrl+C", style="bold red")
         shortcuts.append(" stop all")
@@ -349,7 +349,7 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
                 self._plain_display.set_shortcuts_visible(True)
 
             self._plain_display.info("Switched to plain log output. Recent logs:")
-            self._plain_display.info("  t + Enter: return to terminal display")
+            self._plain_display.info("  t: return to terminal display")
             for source, line in self._logs:
                 self._plain_display.log(source, line)
             return True

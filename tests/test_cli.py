@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import termios
+import threading
+import time
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
@@ -582,7 +586,7 @@ def test_restart_shortcut_listener_sets_restart_event() -> None:
     thread = cli.start_restart_shortcut_listener(
         restart_requested,
         stop_requested,
-        input_stream=TtyInput("r\n"),
+        input_stream=TtyInput("r"),
     )
 
     assert thread is not None
@@ -602,7 +606,7 @@ def test_restart_shortcut_listener_sets_display_toggle_event() -> None:
     thread = cli.start_restart_shortcut_listener(
         restart_requested,
         stop_requested,
-        input_stream=TtyInput("t\n"),
+        input_stream=TtyInput("t"),
         display_toggle_requested=display_toggle_requested,
     )
 
@@ -624,7 +628,7 @@ def test_restart_shortcut_listener_sets_plain_output_event() -> None:
     thread = cli.start_restart_shortcut_listener(
         restart_requested,
         stop_requested,
-        input_stream=TtyInput("plain\n"),
+        input_stream=TtyInput("p"),
         plain_output_requested=plain_output_requested,
     )
 
@@ -646,7 +650,7 @@ def test_restart_shortcut_listener_sets_rich_output_event() -> None:
     thread = cli.start_restart_shortcut_listener(
         restart_requested,
         stop_requested,
-        input_stream=TtyInput("fancy\n"),
+        input_stream=TtyInput("f"),
         rich_output_requested=rich_output_requested,
     )
 
@@ -664,6 +668,43 @@ def test_restart_shortcut_listener_ignores_non_tty_input() -> None:
     )
 
     assert thread is None
+
+
+def test_cbreak_shortcut_listener_restores_terminal_settings() -> None:
+    master_fd, slave_fd = os.openpty()
+    restart_requested = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    try:
+        original_settings = termios.tcgetattr(slave_fd)
+        with os.fdopen(slave_fd, "r", encoding="utf-8", closefd=False) as slave:
+
+            def write_shortcut() -> None:
+                time.sleep(0.05)
+                os.write(master_fd, b"r")
+                time.sleep(0.05)
+                stop_requested.set()
+
+            writer = threading.Thread(target=write_shortcut)
+            writer.start()
+            assert cli.listen_for_cbreak_shortcuts(
+                slave,
+                restart_requested,
+                stop_requested,
+            )
+            writer.join(timeout=1.0)
+
+        assert restart_requested.is_set()
+        restored_settings = termios.tcgetattr(slave_fd)
+        assert bool(restored_settings[3] & termios.ECHO) == bool(
+            original_settings[3] & termios.ECHO
+        )
+        assert bool(restored_settings[3] & termios.ICANON) == bool(
+            original_settings[3] & termios.ICANON
+        )
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
 
 
 def test_supervise_processes_restarts_only_streamlit() -> None:
