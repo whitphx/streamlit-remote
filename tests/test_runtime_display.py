@@ -74,6 +74,44 @@ def test_switchable_runtime_display_replays_recent_logs_in_plain_output() -> Non
     assert list(rich_display._logs)[-1] == ("streamlit", "back in tui")
 
 
+def test_switchable_runtime_display_replays_logs_after_process_error() -> None:
+    plain_output = StringIO()
+    display = SwitchableRuntimeDisplay(
+        RichRuntimeDisplay(console=Console(file=StringIO())),
+        PlainRuntimeDisplay(output=plain_output, error_output=plain_output),
+    )
+
+    display.log("streamlit", "first line")
+    display.log("streamlit", "failure detail")
+
+    display.report_process_exit("streamlit", 2)
+
+    rendered = plain_output.getvalue()
+    assert "error: streamlit exited with code 2." in rendered
+    assert "Recent logs:" in rendered
+    assert "[streamlit] first line" in rendered
+    assert "[streamlit] failure detail" in rendered
+
+
+def test_switchable_runtime_display_does_not_replay_logs_after_plain_process_error() -> None:
+    plain_output = StringIO()
+    display = SwitchableRuntimeDisplay(
+        RichRuntimeDisplay(console=Console(file=StringIO())),
+        PlainRuntimeDisplay(output=plain_output, error_output=plain_output),
+    )
+
+    display.switch_to_plain()
+    plain_output.truncate(0)
+    plain_output.seek(0)
+    display.log("streamlit", "already visible")
+    display.report_process_exit("streamlit", 2)
+
+    rendered = plain_output.getvalue()
+    assert "[streamlit] already visible" in rendered
+    assert "error: streamlit exited with code 2." in rendered
+    assert "Recent logs:" not in rendered
+
+
 def test_rich_runtime_display_limits_visible_log_lines() -> None:
     output = StringIO()
     console = Console(file=output, width=80, height=16, force_terminal=True)

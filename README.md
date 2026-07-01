@@ -68,6 +68,8 @@ Press `r` to restart only the Streamlit server while keeping the remote tunnel p
 
 Press `t` to toggle between the live terminal display and plain prefixed log output. When switching to plain output, `st-remote` replays recent logs into the normal terminal buffer so you can copy older logs from terminal or tmux history. You can also press `p` to force plain output and `f` to force the live terminal display. In terminals where single-key input is unavailable, the Enter-based commands still work.
 
+If Streamlit or the remote tunnel exits with an error while the live terminal display is active, `st-remote` returns to the normal terminal buffer and replays recent logs before exiting.
+
 Use Ctrl+C to stop both Streamlit and the remote tunnel.
 
 ## Local HTTPS
