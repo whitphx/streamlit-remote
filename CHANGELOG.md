@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.6.0'></a>
+## 0.6.0 — 2026-07-01
+
+### Added
+
+- Added a live terminal display for interactive sessions, with `--no-tui` and `t` + Enter available for toggling between fancy and plain prefixed logs.
+
 <a id='changelog-0.5.0'></a>
 ## 0.5.0 — 2026-06-22
 
