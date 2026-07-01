@@ -31,6 +31,7 @@ from streamlit_remote.providers.ngrok import (
     planned_managed_oauth_policy,
     prepare_managed_oauth_policy,
 )
+from streamlit_remote.runtime_display import make_runtime_display
 from streamlit_remote.server import LocalServerConfig, is_port_available, wait_until_listening
 
 
@@ -134,6 +135,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print subprocess commands without running them.",
+    )
+    parser.add_argument(
+        "--no-tui",
+        action="store_true",
+        help="Use plain log output instead of the interactive terminal display.",
     )
     parser.add_argument(
         "--verbose",
@@ -352,19 +358,25 @@ def run(namespace: argparse.Namespace) -> int:
             ),
         )
 
-    print("Streamlit local URL:")
-    print(f"  {local_server.url}")
+    display = make_runtime_display(
+        use_tui=sys.stdout.isatty() and not namespace.no_tui,
+    )
+    display.start()
+    display.set_local_url(local_server.url)
+    display.set_status("Streamlit", "starting")
     if namespace.no_remote:
-        print("\nRemote access: disabled")
+        display.info("Remote access: disabled")
         if not namespace.no_browser:
             open_browser(local_server.url)
     else:
         if namespace.https_mode == "self-signed" and namespace.provider == "ngrok":
-            print(
-                "\nNote: ngrok already provides HTTPS for the public URL. "
+            display.info(
+                "Note: ngrok already provides HTTPS for the public URL. "
                 "Local self-signed HTTPS will be used only between ngrok and Streamlit."
             )
-        print("\nStarting remote tunnel...")
+        assert provider is not None
+        display.set_status(provider.log_prefix, "starting")
+        display.info("Starting remote tunnel...")
 
     remote_url_printed = threading.Event()
     remote_url_lock = threading.Lock()
@@ -375,10 +387,7 @@ def run(namespace: argparse.Namespace) -> int:
                 return
 
             remote_url_printed.set()
-            print("\nStreamlit local URL:")
-            print(f"  {local_server.url}")
-            print("\nRemote HTTPS URL:")
-            print(f"  {public_url}\n")
+            display.set_remote_url(public_url)
             if not namespace.no_browser:
                 open_browser(public_url)
 
@@ -406,19 +415,26 @@ def run(namespace: argparse.Namespace) -> int:
     public_url_poll_thread: threading.Thread | None = None
     shortcut_stop_requested = threading.Event()
     restart_requested = threading.Event()
+    display_toggle_requested = threading.Event()
+    plain_output_requested = threading.Event()
+    rich_output_requested = threading.Event()
 
     def start_streamlit_process() -> ManagedProcess:
-        return start_logged_process(streamlit_command, "streamlit")
+        display.set_status("Streamlit", "starting")
+        return start_logged_process(streamlit_command, "streamlit", write_log=display.log)
 
     def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
-        print("\nRestarting Streamlit...")
+        display.set_status("Streamlit", "restarting")
+        display.info("Restarting Streamlit...")
         terminate_processes([current_handle])
         next_handle = start_streamlit_process()
         if not wait_until_listening(local_server.host, local_server.port):
-            print(
+            display.set_status("Streamlit", "restart failed")
+            display.error(
                 f"error: Streamlit did not start listening on {local_server.url} after restart.",
-                file=sys.stderr,
             )
+        else:
+            display.set_status("Streamlit", "running")
         return next_handle
 
     try:
@@ -430,6 +446,7 @@ def run(namespace: argparse.Namespace) -> int:
             raise CliError(
                 f"Streamlit did not start listening on {local_server.url} within the timeout."
             )
+        display.set_status("Streamlit", "running")
 
         if tunnel_command is not None:
             assert provider is not None
@@ -441,7 +458,9 @@ def run(namespace: argparse.Namespace) -> int:
                     line,
                     namespace.tunnel_log_level,
                 ),
+                write_log=display.log,
             )
+            display.set_status(provider.log_prefix, "running")
             public_url_poll_thread = threading.Thread(
                 target=poll_provider_public_url,
                 name="streamlit-remote-public-url-poll",
@@ -452,10 +471,12 @@ def run(namespace: argparse.Namespace) -> int:
         shortcut_thread = start_restart_shortcut_listener(
             restart_requested,
             shortcut_stop_requested,
+            display_toggle_requested=display_toggle_requested,
+            plain_output_requested=plain_output_requested,
+            rich_output_requested=rich_output_requested,
         )
         if shortcut_thread is not None:
-            print("\nRuntime shortcuts:")
-            print("  r + Enter: restart Streamlit while keeping the tunnel running")
+            display.set_shortcuts_visible(True)
 
         def restart_and_track(current_handle: ManagedProcess) -> ManagedProcess:
             nonlocal streamlit_handle
@@ -467,9 +488,15 @@ def run(namespace: argparse.Namespace) -> int:
             tunnel_handle,
             restart_requested,
             restart_and_track,
+            display_toggle_requested=display_toggle_requested,
+            toggle_display=display.toggle_display,
+            plain_output_requested=plain_output_requested,
+            switch_to_plain=display.switch_to_plain,
+            rich_output_requested=rich_output_requested,
+            switch_to_rich=display.switch_to_rich,
         )
     except KeyboardInterrupt:
-        print("\nInterrupted. Shutting down child processes...", file=sys.stderr)
+        display.error("Interrupted. Shutting down child processes...")
         return 130
     finally:
         shortcut_stop_requested.set()
@@ -480,6 +507,7 @@ def run(namespace: argparse.Namespace) -> int:
             public_url_poll_thread.join(timeout=1.0)
         if traffic_policy is not None:
             traffic_policy.cleanup()
+        display.stop()
 
 
 def main() -> None:
@@ -494,6 +522,9 @@ def start_restart_shortcut_listener(
     restart_requested: threading.Event,
     stop_requested: threading.Event,
     input_stream: TextIO | None = None,
+    display_toggle_requested: threading.Event | None = None,
+    plain_output_requested: threading.Event | None = None,
+    rich_output_requested: threading.Event | None = None,
 ) -> threading.Thread | None:
     stdin = sys.stdin if input_stream is None else input_stream
     if not stdin.isatty():
@@ -507,8 +538,15 @@ def start_restart_shortcut_listener(
                 return
             if line == "":
                 return
-            if line.strip().lower() in {"r", "restart"}:
+            shortcut = line.strip().lower()
+            if shortcut in {"r", "restart"}:
                 restart_requested.set()
+            elif display_toggle_requested is not None and shortcut in {"t", "toggle"}:
+                display_toggle_requested.set()
+            elif plain_output_requested is not None and shortcut in {"plain", "logs"}:
+                plain_output_requested.set()
+            elif rich_output_requested is not None and shortcut in {"fancy", "tui"}:
+                rich_output_requested.set()
 
     thread = threading.Thread(
         target=listen,
@@ -525,12 +563,36 @@ def supervise_processes(
     restart_requested: threading.Event,
     restart_streamlit: Callable[[ManagedProcess], ManagedProcess],
     poll_interval: float = 0.2,
+    display_toggle_requested: threading.Event | None = None,
+    toggle_display: Callable[[], bool] | None = None,
+    plain_output_requested: threading.Event | None = None,
+    switch_to_plain: Callable[[], bool] | None = None,
+    rich_output_requested: threading.Event | None = None,
+    switch_to_rich: Callable[[], bool] | None = None,
 ) -> int:
     current_streamlit_handle = streamlit_handle
     while True:
         if restart_requested.is_set():
             restart_requested.clear()
             current_streamlit_handle = restart_streamlit(current_streamlit_handle)
+            continue
+
+        if display_toggle_requested is not None and display_toggle_requested.is_set():
+            display_toggle_requested.clear()
+            if toggle_display is not None:
+                toggle_display()
+            continue
+
+        if plain_output_requested is not None and plain_output_requested.is_set():
+            plain_output_requested.clear()
+            if switch_to_plain is not None:
+                switch_to_plain()
+            continue
+
+        if rich_output_requested is not None and rich_output_requested.is_set():
+            rich_output_requested.clear()
+            if switch_to_rich is not None:
+                switch_to_rich()
             continue
 
         if tunnel_handle is not None and tunnel_handle.process.poll() is not None:

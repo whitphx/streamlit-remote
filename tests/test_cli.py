@@ -19,6 +19,7 @@ def test_parse_args_accepts_streamlit_args_after_separator() -> None:
     assert namespace.port == 9000
     assert namespace.streamlit_args == ["--server.headless", "true"]
     assert namespace.toolbar_mode == "developer"
+    assert not namespace.no_tui
     assert not namespace.no_browser
 
 
@@ -589,6 +590,72 @@ def test_restart_shortcut_listener_sets_restart_event() -> None:
     assert restart_requested.is_set()
 
 
+def test_restart_shortcut_listener_sets_display_toggle_event() -> None:
+    class TtyInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    restart_requested = cli.threading.Event()
+    display_toggle_requested = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    thread = cli.start_restart_shortcut_listener(
+        restart_requested,
+        stop_requested,
+        input_stream=TtyInput("t\n"),
+        display_toggle_requested=display_toggle_requested,
+    )
+
+    assert thread is not None
+    thread.join(timeout=1.0)
+    assert display_toggle_requested.is_set()
+    assert not restart_requested.is_set()
+
+
+def test_restart_shortcut_listener_sets_plain_output_event() -> None:
+    class TtyInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    restart_requested = cli.threading.Event()
+    plain_output_requested = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    thread = cli.start_restart_shortcut_listener(
+        restart_requested,
+        stop_requested,
+        input_stream=TtyInput("plain\n"),
+        plain_output_requested=plain_output_requested,
+    )
+
+    assert thread is not None
+    thread.join(timeout=1.0)
+    assert plain_output_requested.is_set()
+    assert not restart_requested.is_set()
+
+
+def test_restart_shortcut_listener_sets_rich_output_event() -> None:
+    class TtyInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    restart_requested = cli.threading.Event()
+    rich_output_requested = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    thread = cli.start_restart_shortcut_listener(
+        restart_requested,
+        stop_requested,
+        input_stream=TtyInput("fancy\n"),
+        rich_output_requested=rich_output_requested,
+    )
+
+    assert thread is not None
+    thread.join(timeout=1.0)
+    assert rich_output_requested.is_set()
+    assert not restart_requested.is_set()
+
+
 def test_restart_shortcut_listener_ignores_non_tty_input() -> None:
     thread = cli.start_restart_shortcut_listener(
         cli.threading.Event(),
@@ -621,6 +688,72 @@ def test_supervise_processes_restarts_only_streamlit() -> None:
     assert exit_code == 0
     assert restarted == ["streamlit"]
     assert tunnel_handle.process.poll() is None
+
+
+def test_supervise_processes_switches_to_plain_output() -> None:
+    restart_requested = cli.threading.Event()
+    plain_output_requested = cli.threading.Event()
+    plain_output_requested.set()
+    switched = cli.threading.Event()
+    streamlit_handle = make_process_handle("streamlit", returncode=0, poll_results=[None, 0])
+
+    exit_code = cli.supervise_processes(
+        streamlit_handle,
+        None,
+        restart_requested,
+        lambda handle: handle,
+        poll_interval=0,
+        plain_output_requested=plain_output_requested,
+        switch_to_plain=lambda: switched.set() or True,
+    )
+
+    assert exit_code == 0
+    assert switched.is_set()
+    assert not plain_output_requested.is_set()
+
+
+def test_supervise_processes_toggles_display_output() -> None:
+    restart_requested = cli.threading.Event()
+    display_toggle_requested = cli.threading.Event()
+    display_toggle_requested.set()
+    toggled = cli.threading.Event()
+    streamlit_handle = make_process_handle("streamlit", returncode=0, poll_results=[None, 0])
+
+    exit_code = cli.supervise_processes(
+        streamlit_handle,
+        None,
+        restart_requested,
+        lambda handle: handle,
+        poll_interval=0,
+        display_toggle_requested=display_toggle_requested,
+        toggle_display=lambda: toggled.set() or True,
+    )
+
+    assert exit_code == 0
+    assert toggled.is_set()
+    assert not display_toggle_requested.is_set()
+
+
+def test_supervise_processes_switches_to_rich_output() -> None:
+    restart_requested = cli.threading.Event()
+    rich_output_requested = cli.threading.Event()
+    rich_output_requested.set()
+    switched = cli.threading.Event()
+    streamlit_handle = make_process_handle("streamlit", returncode=0, poll_results=[None, 0])
+
+    exit_code = cli.supervise_processes(
+        streamlit_handle,
+        None,
+        restart_requested,
+        lambda handle: handle,
+        poll_interval=0,
+        rich_output_requested=rich_output_requested,
+        switch_to_rich=lambda: switched.set() or True,
+    )
+
+    assert exit_code == 0
+    assert switched.is_set()
+    assert not rich_output_requested.is_set()
 
 
 def test_run_no_remote_opens_local_https_url(

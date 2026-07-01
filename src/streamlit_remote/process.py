@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 LineHandler = Callable[[str], None]
 LinePredicate = Callable[[str], bool]
+LogWriter = Callable[[str, str], None]
 
 
 @dataclass
@@ -23,6 +24,7 @@ def start_logged_process(
     prefix: str,
     on_line: LineHandler | None = None,
     should_print_line: LinePredicate | None = None,
+    write_log: LogWriter | None = None,
 ) -> ManagedProcess:
     process = subprocess.Popen(
         list(command),
@@ -41,7 +43,10 @@ def start_logged_process(
         for raw_line in process.stdout:
             line = raw_line.rstrip("\r\n")
             if should_print_line is None or should_print_line(line):
-                print(f"[{prefix}] {line}", flush=True)
+                if write_log is None:
+                    print(f"[{prefix}] {line}", flush=True)
+                else:
+                    write_log(prefix, line)
             if on_line is not None:
                 on_line(line)
 
