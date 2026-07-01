@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.7.0'></a>
+## 0.7.0 — 2026-07-01
+
+### Changed
+
+- Changed interactive runtime shortcuts to work as single-key hotkeys, while keeping Enter-based commands as a fallback.
+
 <a id='changelog-0.6.0'></a>
 ## 0.6.0 — 2026-07-01
 
