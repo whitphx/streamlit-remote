@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import threading
 from collections import deque
@@ -11,6 +12,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 class RuntimeDisplay(Protocol):
@@ -33,6 +36,8 @@ class RuntimeDisplay(Protocol):
     def set_status(self, component: str, status: str) -> None: ...
 
     def set_shortcuts_visible(self, visible: bool) -> None: ...
+
+    def subprocess_columns(self, source: str) -> int | None: ...
 
     def info(self, message: str) -> None: ...
 
@@ -80,6 +85,9 @@ class PlainRuntimeDisplay(RuntimeDisplay):
             self.info("Runtime shortcuts:")
             self.info("  r: restart Streamlit while keeping the tunnel running")
 
+    def subprocess_columns(self, source: str) -> int | None:
+        return None
+
     def info(self, message: str) -> None:
         print(message, file=self._output, flush=True)
 
@@ -97,6 +105,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
     _PANEL_HORIZONTAL_OVERHEAD = 4
     _LOG_SOURCE_WIDTH = 11
     _LOG_SOURCE_SEPARATOR_WIDTH = 1
+    _RICH_TRACEBACK_CHARS = frozenset("╭╮╰╯│─❱")
 
     def __init__(
         self,
@@ -164,6 +173,11 @@ class RichRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._refresh()
+
+    def subprocess_columns(self, source: str) -> int | None:
+        if source == "streamlit":
+            return self._log_panel_content_width()
+        return self._log_line_width()
 
     def info(self, message: str) -> None:
         self.log("st-remote", message)
@@ -250,9 +264,19 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
         lines = Text()
         visible_logs = self._visible_logs(panel_height=panel_height)
+        raw_traceback_indexes = self._raw_streamlit_traceback_indexes(visible_logs)
         for index, (source, line) in enumerate(visible_logs):
-            lines.append(f"{source:>11} ", style=self._source_style(source))
-            lines.append(self._format_log_line(line))
+            if index in raw_traceback_indexes:
+                line_width = self._log_panel_content_width()
+                lines.append(
+                    self._format_log_line(
+                        self._format_raw_streamlit_traceback_line(line),
+                        width=line_width,
+                    ).ljust(line_width)
+                )
+            else:
+                lines.append(f"{source:>11} ", style=self._source_style(source))
+                lines.append(self._format_log_line(line, width=self._log_line_width()))
             if index < len(visible_logs) - 1:
                 lines.append("\n")
         return Panel(lines, title="Logs", height=panel_height)
@@ -260,23 +284,124 @@ class RichRuntimeDisplay(RuntimeDisplay):
     def _visible_logs(self, *, panel_height: int | None = None) -> list[tuple[str, str]]:
         log_panel_height = panel_height or self._layout_heights()[1]
         available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
-        return list(self._logs)[-available_rows:]
+        logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        return self._select_visible_logs(logs, available_rows=available_rows)
 
-    def _format_log_line(self, line: str) -> str:
+    def _select_visible_logs(
+        self,
+        logs: list[tuple[str, str]],
+        *,
+        available_rows: int,
+    ) -> list[tuple[str, str]]:
+        if len(logs) <= available_rows:
+            return logs
+
+        traceback_span = self._latest_streamlit_traceback_span(logs)
+        if traceback_span is None:
+            return logs[-available_rows:]
+
+        start, end = traceback_span
+        if any(source == "streamlit" for source, _ in logs[end:]):
+            return logs[-available_rows:]
+
+        traceback_logs = logs[start:end]
+        if len(traceback_logs) >= available_rows:
+            return traceback_logs[-available_rows:]
+
+        following_rows = available_rows - len(traceback_logs)
+        following_logs = logs[end:][-following_rows:] if following_rows else []
+        selected_logs = [*traceback_logs, *following_logs]
+
+        preceding_rows = available_rows - len(selected_logs)
+        if preceding_rows:
+            selected_logs = [*logs[:start][-preceding_rows:], *selected_logs]
+        return selected_logs
+
+    def _move_interleaved_logs_after_tracebacks(
+        self,
+        logs: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        arranged_logs: list[tuple[str, str]] = []
+        deferred_logs: list[tuple[str, str]] = []
+        in_streamlit_traceback = False
+
+        for source, line in logs:
+            if self._is_streamlit_traceback_marker(source, line):
+                in_streamlit_traceback = True
+                arranged_logs.append((source, line))
+            elif in_streamlit_traceback and source != "streamlit":
+                deferred_logs.append((source, line))
+            else:
+                arranged_logs.append((source, line))
+
+        arranged_logs.extend(deferred_logs)
+        return arranged_logs
+
+    def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
+        raw_indexes: set[int] = set()
+        for start, end in self._streamlit_traceback_spans(logs):
+            raw_indexes.update(range(start, end))
+        return raw_indexes
+
+    def _latest_streamlit_traceback_span(
+        self,
+        logs: list[tuple[str, str]],
+    ) -> tuple[int, int] | None:
+        spans = self._streamlit_traceback_spans(logs)
+        if not spans:
+            return None
+        return spans[-1]
+
+    def _streamlit_traceback_spans(self, logs: list[tuple[str, str]]) -> list[tuple[int, int]]:
+        marker_indexes = [
+            index
+            for index, (source, line) in enumerate(logs)
+            if self._is_streamlit_traceback_marker(source, line)
+        ]
+        spans: list[tuple[int, int]] = []
+        for marker_index in marker_indexes:
+            start = marker_index
+            while start > 0 and logs[start - 1][0] == "streamlit":
+                start -= 1
+
+            end = marker_index + 1
+            while end < len(logs) and logs[end][0] == "streamlit":
+                end += 1
+
+            if spans and start <= spans[-1][1]:
+                spans[-1] = (spans[-1][0], max(spans[-1][1], end))
+            else:
+                spans.append((start, end))
+        return spans
+
+    def _is_streamlit_traceback_marker(self, source: str, line: str) -> bool:
+        if source != "streamlit":
+            return False
+        return any(char in _ANSI_ESCAPE_RE.sub("", line) for char in self._RICH_TRACEBACK_CHARS)
+
+    def _format_raw_streamlit_traceback_line(self, line: str) -> str:
+        line = _ANSI_ESCAPE_RE.sub("", line)
+        line = re.sub(r"^\s*│ ?", "", line)
+        return re.sub(r"\s+│\s*$", "", line).rstrip()
+
+    def _format_log_line(self, line: str, *, width: int) -> str:
         line = line.replace("\n", r"\n").replace("\r", r"\r")
-        line_width = self._log_line_width()
-        if len(line) <= line_width:
+        if len(line) <= width:
             return line
-        if line_width <= 3:
-            return "." * line_width
-        return f"{line[: line_width - 3]}..."
+        if width <= 3:
+            return "." * width
+        return f"{line[: width - 3]}..."
 
     def _log_line_width(self) -> int:
-        content_width = self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD
         return max(
             1,
-            content_width - self._LOG_SOURCE_WIDTH - self._LOG_SOURCE_SEPARATOR_WIDTH,
+            self._log_panel_content_width()
+            - self._LOG_SOURCE_WIDTH
+            - self._LOG_SOURCE_SEPARATOR_WIDTH,
         )
+
+    def _log_panel_content_width(self) -> int:
+        return max(1, self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD)
 
     def _render_shortcuts_panel(self, *, height: int | None = None) -> Panel:
         if not self._shortcuts_visible:
@@ -426,6 +551,10 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._active_display.set_shortcuts_visible(visible)
+
+    def subprocess_columns(self, source: str) -> int | None:
+        with self._lock:
+            return self._active_display.subprocess_columns(source)
 
     def info(self, message: str) -> None:
         with self._lock:

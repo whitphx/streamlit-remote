@@ -3,9 +3,10 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from os import environ
 
 LineHandler = Callable[[str], None]
 LinePredicate = Callable[[str], bool]
@@ -25,7 +26,13 @@ def start_logged_process(
     on_line: LineHandler | None = None,
     should_print_line: LinePredicate | None = None,
     write_log: LogWriter | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> ManagedProcess:
+    process_env = None
+    if env is not None:
+        process_env = environ.copy()
+        process_env.update(env)
+
     process = subprocess.Popen(
         list(command),
         stdout=subprocess.PIPE,
@@ -34,6 +41,7 @@ def start_logged_process(
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        env=process_env,
     )
 
     def pump_output() -> None:

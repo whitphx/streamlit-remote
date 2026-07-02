@@ -926,6 +926,58 @@ def test_run_no_remote_no_browser_does_not_open_local_url(
     assert opened == []
 
 
+def test_run_passes_display_columns_to_streamlit_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    started_processes: list[dict[str, object]] = []
+
+    display = SimpleNamespace(
+        start=lambda: None,
+        stop=lambda: None,
+        switch_to_plain=lambda: False,
+        switch_to_rich=lambda: False,
+        toggle_display=lambda: False,
+        report_process_exit=lambda source, returncode: None,
+        set_local_url=lambda url: None,
+        set_remote_url=lambda url: None,
+        set_status=lambda component, status: None,
+        set_shortcuts_visible=lambda visible: None,
+        info=lambda message: None,
+        error=lambda message: None,
+        log=lambda source, line: None,
+        subprocess_columns=lambda source: 33,
+    )
+
+    def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
+        started_processes.append({"command": command, "prefix": prefix, **kwargs})
+        return SimpleNamespace(
+            process=SimpleNamespace(
+                returncode=0,
+                poll=lambda: 0,
+                terminate=lambda: None,
+                wait=lambda timeout=None: 0,
+            ),
+            prefix=prefix,
+            output_thread=SimpleNamespace(join=lambda timeout=None: None),
+        )
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "is_port_available", lambda host, port: True)
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: display)
+    monkeypatch.setattr(cli, "start_logged_process", start_process)
+
+    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser"])
+    exit_code = cli.run(namespace)
+
+    assert exit_code == 0
+    assert started_processes[0]["prefix"] == "streamlit"
+    assert started_processes[0]["env"] == {"COLUMNS": "33"}
+
+
 def make_process_handle(
     prefix: str,
     *,

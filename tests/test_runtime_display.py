@@ -164,3 +164,74 @@ def test_rich_runtime_display_truncates_long_log_lines() -> None:
 
     assert "..." in rendered
     assert long_message not in rendered
+
+
+def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
+    output = StringIO()
+    console = Console(file=output, width=60, height=12, force_terminal=True, color_system=None)
+    display = RichRuntimeDisplay(console=console)
+
+    display.log("streamlit", "")
+    display.log("streamlit", "│ /app/example.py:8 in <module>                     │")
+    display.log("cloudflared", "pass target=region1.v2.argotunnel.com")
+    display.log("streamlit", "❱  8 │   raise RuntimeError(")
+    display.log("streamlit", "─────────────────────────────────────────────────────")
+    display.log("streamlit", "RuntimeError: boom")
+
+    console.print(display._render_log_panel(height=8))
+    rendered = output.getvalue()
+    formatted_line = display._format_log_line(
+        display._format_raw_streamlit_traceback_line(
+            "│ /app/example.py:8 in <module>                     │"
+        ),
+        width=display._log_panel_content_width(),
+    ).ljust(display._log_panel_content_width())
+
+    assert "streamlit   /app/example.py" not in rendered
+    assert "/app/example.py:8 in <module>" in rendered
+    assert "in <module>                     │" not in rendered
+    assert "❱  8 │   raise RuntimeError(" in rendered
+    assert len(formatted_line) == display._log_panel_content_width()
+    assert formatted_line.endswith(" ")
+    assert rendered.index("RuntimeError: boom") < rendered.index("cloudflared")
+    assert display._is_streamlit_traceback_marker("streamlit", "\x1b[31m│\x1b[0m /app")
+
+
+def test_rich_runtime_display_keeps_traceback_visible_after_tunnel_log_burst() -> None:
+    output = StringIO()
+    console = Console(file=output, width=80, height=12, force_terminal=True, color_system=None)
+    display = RichRuntimeDisplay(console=console)
+
+    display.log("streamlit", "")
+    display.log("streamlit", "/app/example.py:8 in <module>                     │")
+    display.log("streamlit", "❱  8 │   raise RuntimeError(")
+    display.log("streamlit", "─────────────────────────────────────────────────────")
+    display.log("streamlit", "RuntimeError: boom")
+    for index in range(20):
+        display.log("cloudflared", f"precheck status=pass target=region{index}.example")
+
+    console.print(display._render_log_panel(height=8))
+    rendered = output.getvalue()
+
+    assert "RuntimeError: boom" in rendered
+    assert "streamlit   /app/example.py" not in rendered
+    assert "precheck status=pass" in rendered
+
+
+def test_rich_runtime_display_reports_subprocess_width_for_log_column() -> None:
+    console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
+    display = RichRuntimeDisplay(console=console)
+
+    assert display.subprocess_columns("streamlit") == 36
+
+
+def test_switchable_runtime_display_reports_active_subprocess_width() -> None:
+    console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
+    display = SwitchableRuntimeDisplay(
+        RichRuntimeDisplay(console=console),
+        PlainRuntimeDisplay(output=StringIO(), error_output=StringIO()),
+    )
+
+    assert display.subprocess_columns("streamlit") == 36
+    display.switch_to_plain()
+    assert display.subprocess_columns("streamlit") is None
