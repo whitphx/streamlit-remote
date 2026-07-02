@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import threading
 from collections import deque
@@ -11,6 +12,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 class RuntimeDisplay(Protocol):
@@ -102,7 +105,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
     _PANEL_HORIZONTAL_OVERHEAD = 4
     _LOG_SOURCE_WIDTH = 11
     _LOG_SOURCE_SEPARATOR_WIDTH = 1
-    _RICH_TRACEBACK_LINE_PREFIXES = ("╭", "│", "╰")
+    _RICH_TRACEBACK_CHARS = frozenset("╭╮╰╯│─❱")
 
     def __init__(
         self,
@@ -261,8 +264,9 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
         lines = Text()
         visible_logs = self._visible_logs(panel_height=panel_height)
+        raw_traceback_indexes = self._raw_streamlit_traceback_indexes(visible_logs)
         for index, (source, line) in enumerate(visible_logs):
-            if self._is_raw_streamlit_traceback_line(source, line):
+            if index in raw_traceback_indexes:
                 lines.append(self._format_log_line(line, width=self._log_panel_content_width()))
             else:
                 lines.append(f"{source:>11} ", style=self._source_style(source))
@@ -285,27 +289,40 @@ class RichRuntimeDisplay(RuntimeDisplay):
         in_streamlit_traceback = False
 
         for source, line in logs:
-            if self._is_raw_streamlit_traceback_line(source, line):
+            if self._is_streamlit_traceback_marker(source, line):
                 in_streamlit_traceback = True
                 arranged_logs.append((source, line))
             elif in_streamlit_traceback and source != "streamlit":
                 deferred_logs.append((source, line))
             else:
                 arranged_logs.append((source, line))
-                if in_streamlit_traceback:
-                    arranged_logs.extend(deferred_logs)
-                    deferred_logs.clear()
-                    in_streamlit_traceback = False
 
         arranged_logs.extend(deferred_logs)
         return arranged_logs
 
-    def _is_raw_streamlit_traceback_line(self, source: str, line: str) -> bool:
-        stripped_line = line.lstrip()
-        return source == "streamlit" and (
-            stripped_line.startswith(self._RICH_TRACEBACK_LINE_PREFIXES)
-            or (bool(stripped_line) and set(stripped_line) <= {"─"})
-        )
+    def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
+        marker_indexes = [
+            index
+            for index, (source, line) in enumerate(logs)
+            if self._is_streamlit_traceback_marker(source, line)
+        ]
+        raw_indexes: set[int] = set()
+        for marker_index in marker_indexes:
+            start = marker_index
+            while start > 0 and logs[start - 1][0] == "streamlit":
+                start -= 1
+
+            end = marker_index
+            while end + 1 < len(logs) and logs[end + 1][0] == "streamlit":
+                end += 1
+
+            raw_indexes.update(range(start, end + 1))
+        return raw_indexes
+
+    def _is_streamlit_traceback_marker(self, source: str, line: str) -> bool:
+        if source != "streamlit":
+            return False
+        return any(char in _ANSI_ESCAPE_RE.sub("", line) for char in self._RICH_TRACEBACK_CHARS)
 
     def _format_log_line(self, line: str, *, width: int) -> str:
         line = line.replace("\n", r"\n").replace("\r", r"\r")

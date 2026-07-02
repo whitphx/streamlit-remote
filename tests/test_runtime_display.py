@@ -171,18 +171,20 @@ def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
     console = Console(file=output, width=60, height=12, force_terminal=True, color_system=None)
     display = RichRuntimeDisplay(console=console)
 
-    display.log("streamlit", "╭──────── Traceback (most recent call last) ────────╮")
-    display.log("streamlit", "│ /app/example.py:8 in <module>                     │")
+    display.log("streamlit", "")
+    display.log("streamlit", "/app/example.py:8 in <module>                     │")
     display.log("cloudflared", "pass target=region1.v2.argotunnel.com")
-    display.log("streamlit", "╰───────────────────────────────────────────────────╯")
+    display.log("streamlit", "❱  8 │   raise RuntimeError(")
+    display.log("streamlit", "─────────────────────────────────────────────────────")
     display.log("streamlit", "RuntimeError: boom")
 
     console.print(display._render_log_panel(height=8))
     rendered = output.getvalue()
 
-    assert "streamlit   ╭" not in rendered
-    assert "╭──────── Traceback" in rendered
+    assert "streamlit   /app/example.py" not in rendered
+    assert "/app/example.py:8 in <module>" in rendered
     assert rendered.index("RuntimeError: boom") < rendered.index("cloudflared")
+    assert display._is_streamlit_traceback_marker("streamlit", "\x1b[31m│\x1b[0m /app")
 
 
 def test_rich_runtime_display_reports_subprocess_width_for_log_column() -> None:
