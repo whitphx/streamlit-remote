@@ -421,7 +421,16 @@ def run(namespace: argparse.Namespace) -> int:
 
     def start_streamlit_process() -> ManagedProcess:
         display.set_status("Streamlit", "starting")
-        return start_logged_process(streamlit_command, "streamlit", write_log=display.log)
+        streamlit_env: dict[str, str] = {}
+        streamlit_columns = display.subprocess_columns("streamlit")
+        if streamlit_columns is not None:
+            streamlit_env["COLUMNS"] = str(streamlit_columns)
+        return start_logged_process(
+            streamlit_command,
+            "streamlit",
+            write_log=display.log,
+            env=streamlit_env or None,
+        )
 
     def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
         display.set_status("Streamlit", "restarting")

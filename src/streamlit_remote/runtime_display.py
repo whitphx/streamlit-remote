@@ -34,6 +34,8 @@ class RuntimeDisplay(Protocol):
 
     def set_shortcuts_visible(self, visible: bool) -> None: ...
 
+    def subprocess_columns(self, source: str) -> int | None: ...
+
     def info(self, message: str) -> None: ...
 
     def error(self, message: str) -> None: ...
@@ -79,6 +81,9 @@ class PlainRuntimeDisplay(RuntimeDisplay):
         if visible:
             self.info("Runtime shortcuts:")
             self.info("  r: restart Streamlit while keeping the tunnel running")
+
+    def subprocess_columns(self, source: str) -> int | None:
+        return None
 
     def info(self, message: str) -> None:
         print(message, file=self._output, flush=True)
@@ -164,6 +169,9 @@ class RichRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._refresh()
+
+    def subprocess_columns(self, source: str) -> int | None:
+        return self._log_line_width()
 
     def info(self, message: str) -> None:
         self.log("st-remote", message)
@@ -426,6 +434,10 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._active_display.set_shortcuts_visible(visible)
+
+    def subprocess_columns(self, source: str) -> int | None:
+        with self._lock:
+            return self._active_display.subprocess_columns(source)
 
     def info(self, message: str) -> None:
         with self._lock:

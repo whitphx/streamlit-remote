@@ -164,3 +164,22 @@ def test_rich_runtime_display_truncates_long_log_lines() -> None:
 
     assert "..." in rendered
     assert long_message not in rendered
+
+
+def test_rich_runtime_display_reports_subprocess_width_for_log_column() -> None:
+    console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
+    display = RichRuntimeDisplay(console=console)
+
+    assert display.subprocess_columns("streamlit") == 24
+
+
+def test_switchable_runtime_display_reports_active_subprocess_width() -> None:
+    console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
+    display = SwitchableRuntimeDisplay(
+        RichRuntimeDisplay(console=console),
+        PlainRuntimeDisplay(output=StringIO(), error_output=StringIO()),
+    )
+
+    assert display.subprocess_columns("streamlit") == 24
+    display.switch_to_plain()
+    assert display.subprocess_columns("streamlit") is None
