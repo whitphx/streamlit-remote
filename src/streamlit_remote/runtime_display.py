@@ -102,6 +102,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
     _PANEL_HORIZONTAL_OVERHEAD = 4
     _LOG_SOURCE_WIDTH = 11
     _LOG_SOURCE_SEPARATOR_WIDTH = 1
+    _RICH_TRACEBACK_LINE_PREFIXES = ("╭", "│", "╰")
 
     def __init__(
         self,
@@ -171,6 +172,8 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._refresh()
 
     def subprocess_columns(self, source: str) -> int | None:
+        if source == "streamlit":
+            return self._log_panel_content_width()
         return self._log_line_width()
 
     def info(self, message: str) -> None:
@@ -259,8 +262,11 @@ class RichRuntimeDisplay(RuntimeDisplay):
         lines = Text()
         visible_logs = self._visible_logs(panel_height=panel_height)
         for index, (source, line) in enumerate(visible_logs):
-            lines.append(f"{source:>11} ", style=self._source_style(source))
-            lines.append(self._format_log_line(line))
+            if self._is_raw_streamlit_traceback_line(source, line):
+                lines.append(self._format_log_line(line, width=self._log_panel_content_width()))
+            else:
+                lines.append(f"{source:>11} ", style=self._source_style(source))
+                lines.append(self._format_log_line(line, width=self._log_line_width()))
             if index < len(visible_logs) - 1:
                 lines.append("\n")
         return Panel(lines, title="Logs", height=panel_height)
@@ -268,23 +274,57 @@ class RichRuntimeDisplay(RuntimeDisplay):
     def _visible_logs(self, *, panel_height: int | None = None) -> list[tuple[str, str]]:
         log_panel_height = panel_height or self._layout_heights()[1]
         available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
-        return list(self._logs)[-available_rows:]
+        return self._move_interleaved_logs_after_tracebacks(list(self._logs)[-available_rows:])
 
-    def _format_log_line(self, line: str) -> str:
+    def _move_interleaved_logs_after_tracebacks(
+        self,
+        logs: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        arranged_logs: list[tuple[str, str]] = []
+        deferred_logs: list[tuple[str, str]] = []
+        in_streamlit_traceback = False
+
+        for source, line in logs:
+            if self._is_raw_streamlit_traceback_line(source, line):
+                in_streamlit_traceback = True
+                arranged_logs.append((source, line))
+            elif in_streamlit_traceback and source != "streamlit":
+                deferred_logs.append((source, line))
+            else:
+                arranged_logs.append((source, line))
+                if in_streamlit_traceback:
+                    arranged_logs.extend(deferred_logs)
+                    deferred_logs.clear()
+                    in_streamlit_traceback = False
+
+        arranged_logs.extend(deferred_logs)
+        return arranged_logs
+
+    def _is_raw_streamlit_traceback_line(self, source: str, line: str) -> bool:
+        stripped_line = line.lstrip()
+        return source == "streamlit" and (
+            stripped_line.startswith(self._RICH_TRACEBACK_LINE_PREFIXES)
+            or (bool(stripped_line) and set(stripped_line) <= {"─"})
+        )
+
+    def _format_log_line(self, line: str, *, width: int) -> str:
         line = line.replace("\n", r"\n").replace("\r", r"\r")
-        line_width = self._log_line_width()
-        if len(line) <= line_width:
+        if len(line) <= width:
             return line
-        if line_width <= 3:
-            return "." * line_width
-        return f"{line[: line_width - 3]}..."
+        if width <= 3:
+            return "." * width
+        return f"{line[: width - 3]}..."
 
     def _log_line_width(self) -> int:
-        content_width = self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD
         return max(
             1,
-            content_width - self._LOG_SOURCE_WIDTH - self._LOG_SOURCE_SEPARATOR_WIDTH,
+            self._log_panel_content_width()
+            - self._LOG_SOURCE_WIDTH
+            - self._LOG_SOURCE_SEPARATOR_WIDTH,
         )
+
+    def _log_panel_content_width(self) -> int:
+        return max(1, self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD)
 
     def _render_shortcuts_panel(self, *, height: int | None = None) -> Panel:
         if not self._shortcuts_visible:

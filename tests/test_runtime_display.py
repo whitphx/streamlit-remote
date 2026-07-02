@@ -166,11 +166,30 @@ def test_rich_runtime_display_truncates_long_log_lines() -> None:
     assert long_message not in rendered
 
 
+def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
+    output = StringIO()
+    console = Console(file=output, width=60, height=12, force_terminal=True, color_system=None)
+    display = RichRuntimeDisplay(console=console)
+
+    display.log("streamlit", "╭──────── Traceback (most recent call last) ────────╮")
+    display.log("streamlit", "│ /app/example.py:8 in <module>                     │")
+    display.log("cloudflared", "pass target=region1.v2.argotunnel.com")
+    display.log("streamlit", "╰───────────────────────────────────────────────────╯")
+    display.log("streamlit", "RuntimeError: boom")
+
+    console.print(display._render_log_panel(height=8))
+    rendered = output.getvalue()
+
+    assert "streamlit   ╭" not in rendered
+    assert "╭──────── Traceback" in rendered
+    assert rendered.index("RuntimeError: boom") < rendered.index("cloudflared")
+
+
 def test_rich_runtime_display_reports_subprocess_width_for_log_column() -> None:
     console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
     display = RichRuntimeDisplay(console=console)
 
-    assert display.subprocess_columns("streamlit") == 24
+    assert display.subprocess_columns("streamlit") == 36
 
 
 def test_switchable_runtime_display_reports_active_subprocess_width() -> None:
@@ -180,6 +199,6 @@ def test_switchable_runtime_display_reports_active_subprocess_width() -> None:
         PlainRuntimeDisplay(output=StringIO(), error_output=StringIO()),
     )
 
-    assert display.subprocess_columns("streamlit") == 24
+    assert display.subprocess_columns("streamlit") == 36
     display.switch_to_plain()
     assert display.subprocess_columns("streamlit") is None
