@@ -267,7 +267,12 @@ class RichRuntimeDisplay(RuntimeDisplay):
         raw_traceback_indexes = self._raw_streamlit_traceback_indexes(visible_logs)
         for index, (source, line) in enumerate(visible_logs):
             if index in raw_traceback_indexes:
-                lines.append(self._format_log_line(line, width=self._log_panel_content_width()))
+                lines.append(
+                    self._format_log_line(
+                        self._format_raw_streamlit_traceback_line(line),
+                        width=self._log_panel_content_width(),
+                    )
+                )
             else:
                 lines.append(f"{source:>11} ", style=self._source_style(source))
                 lines.append(self._format_log_line(line, width=self._log_line_width()))
@@ -372,6 +377,10 @@ class RichRuntimeDisplay(RuntimeDisplay):
         if source != "streamlit":
             return False
         return any(char in _ANSI_ESCAPE_RE.sub("", line) for char in self._RICH_TRACEBACK_CHARS)
+
+    def _format_raw_streamlit_traceback_line(self, line: str) -> str:
+        line = re.sub(r"^\s*│ ?", "", line)
+        return re.sub(r"\s+│\s*$", "", line).rstrip()
 
     def _format_log_line(self, line: str, *, width: int) -> str:
         line = line.replace("\n", r"\n").replace("\r", r"\r")

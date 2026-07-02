@@ -172,7 +172,7 @@ def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
     display = RichRuntimeDisplay(console=console)
 
     display.log("streamlit", "")
-    display.log("streamlit", "/app/example.py:8 in <module>                     │")
+    display.log("streamlit", "│ /app/example.py:8 in <module>                     │")
     display.log("cloudflared", "pass target=region1.v2.argotunnel.com")
     display.log("streamlit", "❱  8 │   raise RuntimeError(")
     display.log("streamlit", "─────────────────────────────────────────────────────")
@@ -183,6 +183,8 @@ def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
 
     assert "streamlit   /app/example.py" not in rendered
     assert "/app/example.py:8 in <module>" in rendered
+    assert "in <module>                     │" not in rendered
+    assert "❱  8 │   raise RuntimeError(" in rendered
     assert rendered.index("RuntimeError: boom") < rendered.index("cloudflared")
     assert display._is_streamlit_traceback_marker("streamlit", "\x1b[31m│\x1b[0m /app")
 
