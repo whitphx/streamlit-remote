@@ -278,7 +278,38 @@ class RichRuntimeDisplay(RuntimeDisplay):
     def _visible_logs(self, *, panel_height: int | None = None) -> list[tuple[str, str]]:
         log_panel_height = panel_height or self._layout_heights()[1]
         available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
-        return self._move_interleaved_logs_after_tracebacks(list(self._logs)[-available_rows:])
+        logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        return self._select_visible_logs(logs, available_rows=available_rows)
+
+    def _select_visible_logs(
+        self,
+        logs: list[tuple[str, str]],
+        *,
+        available_rows: int,
+    ) -> list[tuple[str, str]]:
+        if len(logs) <= available_rows:
+            return logs
+
+        traceback_span = self._latest_streamlit_traceback_span(logs)
+        if traceback_span is None:
+            return logs[-available_rows:]
+
+        start, end = traceback_span
+        if any(source == "streamlit" for source, _ in logs[end:]):
+            return logs[-available_rows:]
+
+        traceback_logs = logs[start:end]
+        if len(traceback_logs) >= available_rows:
+            return traceback_logs[-available_rows:]
+
+        following_rows = available_rows - len(traceback_logs)
+        following_logs = logs[end:][-following_rows:] if following_rows else []
+        selected_logs = [*traceback_logs, *following_logs]
+
+        preceding_rows = available_rows - len(selected_logs)
+        if preceding_rows:
+            selected_logs = [*logs[:start][-preceding_rows:], *selected_logs]
+        return selected_logs
 
     def _move_interleaved_logs_after_tracebacks(
         self,
@@ -301,23 +332,41 @@ class RichRuntimeDisplay(RuntimeDisplay):
         return arranged_logs
 
     def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
+        raw_indexes: set[int] = set()
+        for start, end in self._streamlit_traceback_spans(logs):
+            raw_indexes.update(range(start, end))
+        return raw_indexes
+
+    def _latest_streamlit_traceback_span(
+        self,
+        logs: list[tuple[str, str]],
+    ) -> tuple[int, int] | None:
+        spans = self._streamlit_traceback_spans(logs)
+        if not spans:
+            return None
+        return spans[-1]
+
+    def _streamlit_traceback_spans(self, logs: list[tuple[str, str]]) -> list[tuple[int, int]]:
         marker_indexes = [
             index
             for index, (source, line) in enumerate(logs)
             if self._is_streamlit_traceback_marker(source, line)
         ]
-        raw_indexes: set[int] = set()
+        spans: list[tuple[int, int]] = []
         for marker_index in marker_indexes:
             start = marker_index
             while start > 0 and logs[start - 1][0] == "streamlit":
                 start -= 1
 
-            end = marker_index
-            while end + 1 < len(logs) and logs[end + 1][0] == "streamlit":
+            end = marker_index + 1
+            while end < len(logs) and logs[end][0] == "streamlit":
                 end += 1
 
-            raw_indexes.update(range(start, end + 1))
-        return raw_indexes
+            if spans and start <= spans[-1][1]:
+                spans[-1] = (spans[-1][0], max(spans[-1][1], end))
+            else:
+                spans.append((start, end))
+        return spans
 
     def _is_streamlit_traceback_marker(self, source: str, line: str) -> bool:
         if source != "streamlit":

@@ -187,6 +187,27 @@ def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
     assert display._is_streamlit_traceback_marker("streamlit", "\x1b[31m│\x1b[0m /app")
 
 
+def test_rich_runtime_display_keeps_traceback_visible_after_tunnel_log_burst() -> None:
+    output = StringIO()
+    console = Console(file=output, width=80, height=12, force_terminal=True, color_system=None)
+    display = RichRuntimeDisplay(console=console)
+
+    display.log("streamlit", "")
+    display.log("streamlit", "/app/example.py:8 in <module>                     │")
+    display.log("streamlit", "❱  8 │   raise RuntimeError(")
+    display.log("streamlit", "─────────────────────────────────────────────────────")
+    display.log("streamlit", "RuntimeError: boom")
+    for index in range(20):
+        display.log("cloudflared", f"precheck status=pass target=region{index}.example")
+
+    console.print(display._render_log_panel(height=8))
+    rendered = output.getvalue()
+
+    assert "RuntimeError: boom" in rendered
+    assert "streamlit   /app/example.py" not in rendered
+    assert "precheck status=pass" in rendered
+
+
 def test_rich_runtime_display_reports_subprocess_width_for_log_column() -> None:
     console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
     display = RichRuntimeDisplay(console=console)
