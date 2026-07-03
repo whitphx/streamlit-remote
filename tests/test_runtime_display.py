@@ -193,6 +193,7 @@ def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
     assert formatted_line.spans
     assert rendered.index("RuntimeError: boom") < rendered.index("cloudflared")
     assert display._is_streamlit_traceback_marker("streamlit", "\x1b[31m│\x1b[0m /app")
+    assert not display._is_streamlit_traceback_marker("streamlit", "❱ prompt")
 
 
 def test_rich_runtime_display_keeps_traceback_visible_after_tunnel_log_burst() -> None:

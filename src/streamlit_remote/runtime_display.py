@@ -106,7 +106,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
     _PANEL_HORIZONTAL_OVERHEAD = 4
     _LOG_SOURCE_WIDTH = 11
     _LOG_SOURCE_SEPARATOR_WIDTH = 1
-    _RICH_TRACEBACK_CHARS = frozenset("╭╮╰╯│─❱")
+    _RICH_TRACEBACK_CHARS = frozenset("╭╮╰╯│─")
 
     def __init__(
         self,
