@@ -1,6 +1,6 @@
 [project]
 name = "streamlit-remote"
-version = "0.7.1"
+version = "0.7.2"
 description = "Run Streamlit apps with optional remote HTTPS access."
 readme = "README.md"
 license = "MIT"
