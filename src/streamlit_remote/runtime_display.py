@@ -14,6 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+STREAMLIT_SOURCE = "streamlit"
 
 
 class RuntimeDisplay(Protocol):
@@ -175,7 +176,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._refresh()
 
     def subprocess_columns(self, source: str) -> int | None:
-        if source == "streamlit":
+        if source == STREAMLIT_SOURCE:
             # Streamlit may emit preformatted Rich tracebacks that we render
             # without a source prefix.
             return self._log_panel_content_width()
@@ -297,7 +298,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
             return logs[-available_rows:]
 
         start, end = traceback_span
-        if any(source == "streamlit" for source, _ in logs[end:]):
+        if any(source == STREAMLIT_SOURCE for source, _ in logs[end:]):
             return logs[-available_rows:]
 
         traceback_logs = logs[start:end]
@@ -325,7 +326,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
             if self._is_streamlit_traceback_marker(source, line):
                 in_streamlit_traceback = True
                 arranged_logs.append((source, line))
-            elif in_streamlit_traceback and source != "streamlit":
+            elif in_streamlit_traceback and source != STREAMLIT_SOURCE:
                 deferred_logs.append((source, line))
             else:
                 arranged_logs.append((source, line))
@@ -357,11 +358,11 @@ class RichRuntimeDisplay(RuntimeDisplay):
         spans: list[tuple[int, int]] = []
         for marker_index in marker_indexes:
             start = marker_index
-            while start > 0 and logs[start - 1][0] == "streamlit":
+            while start > 0 and logs[start - 1][0] == STREAMLIT_SOURCE:
                 start -= 1
 
             end = marker_index + 1
-            while end < len(logs) and logs[end][0] == "streamlit":
+            while end < len(logs) and logs[end][0] == STREAMLIT_SOURCE:
                 end += 1
 
             if spans and start <= spans[-1][1]:
@@ -371,7 +372,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         return spans
 
     def _is_streamlit_traceback_marker(self, source: str, line: str) -> bool:
-        if source != "streamlit":
+        if source != STREAMLIT_SOURCE:
             return False
         return any(char in _ANSI_ESCAPE_RE.sub("", line) for char in self._RICH_TRACEBACK_CHARS)
 
@@ -442,7 +443,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         return Panel(shortcuts, title="Shortcuts", border_style="green", height=height)
 
     def _source_style(self, source: str) -> str:
-        if source == "streamlit":
+        if source == STREAMLIT_SOURCE:
             return "blue"
         if source in {"cloudflared", "ngrok"}:
             return "magenta"
