@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shlex
 import sys
 import threading
@@ -11,6 +12,7 @@ import webbrowser
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from typing import TextIO
 
 from streamlit_remote.https import (
@@ -430,6 +432,7 @@ def run(namespace: argparse.Namespace) -> int:
     display_toggle_requested = threading.Event()
     plain_output_requested = threading.Event()
     rich_output_requested = threading.Event()
+    log_scroll_requests: SimpleQueue[str] = SimpleQueue()
 
     def start_streamlit_process() -> ManagedProcess:
         display.set_status("Streamlit", "starting")
@@ -495,6 +498,7 @@ def run(namespace: argparse.Namespace) -> int:
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            log_scroll_requests=log_scroll_requests,
         )
         if shortcut_thread is not None:
             display.set_shortcuts_visible(True)
@@ -519,6 +523,10 @@ def run(namespace: argparse.Namespace) -> int:
             switch_to_plain=display.switch_to_plain,
             rich_output_requested=rich_output_requested,
             switch_to_rich=display.switch_to_rich,
+            log_scroll_requests=log_scroll_requests,
+            scroll_log_up=display.scroll_log_up,
+            scroll_log_down=display.scroll_log_down,
+            reset_log_scroll=display.reset_log_scroll,
         )
     except KeyboardInterrupt:
         display.error("Interrupted. Shutting down child processes...")
@@ -550,6 +558,7 @@ def start_restart_shortcut_listener(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    log_scroll_requests: SimpleQueue[str] | None = None,
 ) -> threading.Thread | None:
     stdin = sys.stdin if input_stream is None else input_stream
     if not stdin.isatty():
@@ -563,6 +572,7 @@ def start_restart_shortcut_listener(
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            log_scroll_requests=log_scroll_requests,
         ):
             return
 
@@ -573,6 +583,7 @@ def start_restart_shortcut_listener(
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            log_scroll_requests=log_scroll_requests,
         )
 
     thread = threading.Thread(
@@ -592,6 +603,7 @@ def listen_for_cbreak_shortcuts(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    log_scroll_requests: SimpleQueue[str] | None = None,
 ) -> bool:
     try:
         import select
@@ -618,10 +630,7 @@ def listen_for_cbreak_shortcuts(
             if not readable:
                 continue
 
-            try:
-                shortcut = stdin.read(1)
-            except OSError:
-                return True
+            shortcut = read_cbreak_shortcut(stdin, fd=fd)
             if shortcut == "":
                 return True
             dispatch_shortcut(
@@ -630,6 +639,7 @@ def listen_for_cbreak_shortcuts(
                 display_toggle_requested=display_toggle_requested,
                 plain_output_requested=plain_output_requested,
                 rich_output_requested=rich_output_requested,
+                log_scroll_requests=log_scroll_requests,
             )
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, previous_terminal_settings)
@@ -645,6 +655,7 @@ def listen_for_line_shortcuts(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    log_scroll_requests: SimpleQueue[str] | None = None,
 ) -> None:
     while not stop_requested.is_set():
         try:
@@ -659,6 +670,7 @@ def listen_for_line_shortcuts(
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            log_scroll_requests=log_scroll_requests,
         )
 
 
@@ -669,6 +681,7 @@ def dispatch_shortcut(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    log_scroll_requests: SimpleQueue[str] | None = None,
 ) -> None:
     normalized = shortcut.strip().lower()
     if normalized in {"r", "restart"}:
@@ -679,6 +692,72 @@ def dispatch_shortcut(
         plain_output_requested.set()
     elif rich_output_requested is not None and normalized in {"f", "fancy", "tui"}:
         rich_output_requested.set()
+    elif log_scroll_requests is not None and normalized in {
+        "\x10",
+        "\x1b[a",
+        "k",
+        "up",
+        "scroll up",
+    }:
+        log_scroll_requests.put("up")
+    elif log_scroll_requests is not None and normalized in {
+        "\x0e",
+        "\x1b[b",
+        "j",
+        "down",
+        "scroll down",
+    }:
+        log_scroll_requests.put("down")
+    elif log_scroll_requests is not None and normalized in {"\x1b", "esc", "latest"}:
+        log_scroll_requests.put("reset")
+
+
+def read_cbreak_shortcut(stdin: TextIO, *, fd: int | None = None) -> str:
+    first_byte = read_cbreak_byte(stdin, fd=fd)
+    if first_byte == b"":
+        return ""
+
+    if first_byte != b"\x1b":
+        return first_byte.decode("utf-8", errors="replace")
+
+    select_module = None
+    if fd is not None:
+        try:
+            import select as select_module
+        except ImportError:
+            select_module = None
+
+    sequence = [first_byte]
+    while True:
+        if fd is not None and select_module is not None:
+            try:
+                readable, _, _ = select_module.select([fd], [], [], 0.05)
+            except OSError:
+                return b"".join(sequence).decode("utf-8", errors="replace")
+            if not readable:
+                return b"".join(sequence).decode("utf-8", errors="replace")
+
+        next_byte = read_cbreak_byte(stdin, fd=fd)
+        if next_byte == b"":
+            return b"".join(sequence).decode("utf-8", errors="replace")
+        sequence.append(next_byte)
+        next_char = next_byte.decode("ascii", errors="ignore")
+        if next_char.isalpha() or next_char == "~" or len(sequence) >= 6:
+            return b"".join(sequence).decode("utf-8", errors="replace")
+
+
+def read_cbreak_byte(stdin: TextIO, *, fd: int | None) -> bytes:
+    if fd is not None:
+        try:
+            return os.read(fd, 1)
+        except OSError:
+            return b""
+
+    try:
+        char = stdin.read(1)
+    except OSError:
+        return b""
+    return char.encode()
 
 
 def supervise_processes(
@@ -694,6 +773,10 @@ def supervise_processes(
     switch_to_plain: Callable[[], bool] | None = None,
     rich_output_requested: threading.Event | None = None,
     switch_to_rich: Callable[[], bool] | None = None,
+    log_scroll_requests: SimpleQueue[str] | None = None,
+    scroll_log_up: Callable[[], bool] | None = None,
+    scroll_log_down: Callable[[], bool] | None = None,
+    reset_log_scroll: Callable[[], bool] | None = None,
 ) -> int:
     current_streamlit_handle = streamlit_handle
     while True:
@@ -720,6 +803,14 @@ def supervise_processes(
                 switch_to_rich()
             continue
 
+        if log_scroll_requests is not None and drain_log_scroll_requests(
+            log_scroll_requests,
+            scroll_log_up=scroll_log_up,
+            scroll_log_down=scroll_log_down,
+            reset_log_scroll=reset_log_scroll,
+        ):
+            continue
+
         if tunnel_handle is not None and tunnel_handle.process.poll() is not None:
             return report_process_returncode(tunnel_handle, report_process_error)
 
@@ -727,6 +818,29 @@ def supervise_processes(
             return report_process_returncode(current_streamlit_handle, report_process_error)
 
         time.sleep(poll_interval)
+
+
+def drain_log_scroll_requests(
+    requests: SimpleQueue[str],
+    *,
+    scroll_log_up: Callable[[], bool] | None,
+    scroll_log_down: Callable[[], bool] | None,
+    reset_log_scroll: Callable[[], bool] | None,
+) -> bool:
+    handled = False
+    while True:
+        try:
+            direction = requests.get_nowait()
+        except Empty:
+            return handled
+
+        handled = True
+        if direction == "up" and scroll_log_up is not None:
+            scroll_log_up()
+        elif direction == "down" and scroll_log_down is not None:
+            scroll_log_down()
+        elif direction == "reset" and reset_log_scroll is not None:
+            reset_log_scroll()
 
 
 def report_process_returncode(

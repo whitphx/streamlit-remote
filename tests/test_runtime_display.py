@@ -127,6 +127,63 @@ def test_rich_runtime_display_limits_visible_log_lines() -> None:
     assert "line-0" not in rendered
 
 
+def test_rich_runtime_display_scrolls_log_window() -> None:
+    output = StringIO()
+    console = Console(file=output, width=80, height=12, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=100)
+
+    for index in range(12):
+        display.log("streamlit", f"line-{index}")
+
+    assert display.scroll_log_up()
+    console.print(display._render_log_panel(height=6))
+    rendered = output.getvalue()
+
+    assert "line-7" in rendered
+    assert "line-11" not in rendered
+
+    output.truncate(0)
+    output.seek(0)
+    assert display.scroll_log_down()
+    console.print(display._render_log_panel(height=6))
+    rendered = output.getvalue()
+
+    assert "line-11" in rendered
+
+
+def test_rich_runtime_display_preserves_scrolled_log_window_after_new_logs() -> None:
+    output = StringIO()
+    console = Console(file=output, width=80, height=12, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=100)
+
+    for index in range(12):
+        display.log("streamlit", f"line-{index}")
+
+    assert display.scroll_log_up()
+    display.log("streamlit", "line-12")
+    console.print(display._render_log_panel(height=6))
+    rendered = output.getvalue()
+
+    assert "line-7" in rendered
+    assert "line-12" not in rendered
+
+
+def test_rich_runtime_display_resets_log_scroll_to_latest() -> None:
+    output = StringIO()
+    console = Console(file=output, width=80, height=12, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=100)
+
+    for index in range(12):
+        display.log("streamlit", f"line-{index}")
+
+    assert display.scroll_log_up()
+    assert display.reset_log_scroll()
+    console.print(display._render_log_panel(height=6))
+    rendered = output.getvalue()
+
+    assert "line-11" in rendered
+
+
 def test_rich_runtime_display_uses_terminal_height_for_layout() -> None:
     console = Console(file=StringIO(), width=80, height=16, force_terminal=True)
     display = RichRuntimeDisplay(console=console)

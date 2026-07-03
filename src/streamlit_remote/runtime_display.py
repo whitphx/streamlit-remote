@@ -38,6 +38,12 @@ class RuntimeDisplay(Protocol):
 
     def set_shortcuts_visible(self, visible: bool) -> None: ...
 
+    def scroll_log_up(self) -> bool: ...
+
+    def scroll_log_down(self) -> bool: ...
+
+    def reset_log_scroll(self) -> bool: ...
+
     def streamlit_subprocess_columns(self) -> int | None: ...
 
     def info(self, message: str) -> None: ...
@@ -86,6 +92,15 @@ class PlainRuntimeDisplay(RuntimeDisplay):
             self.info("Runtime shortcuts:")
             self.info("  r: restart Streamlit while keeping the tunnel running")
 
+    def scroll_log_up(self) -> bool:
+        return False
+
+    def scroll_log_down(self) -> bool:
+        return False
+
+    def reset_log_scroll(self) -> bool:
+        return False
+
     def streamlit_subprocess_columns(self) -> int | None:
         return None
 
@@ -119,6 +134,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         self._local_url: str | None = None
         self._remote_url: str | None = None
         self._shortcuts_visible = False
+        self._log_scroll_offset = 0
         self._live: Live | None = None
         self._lock = threading.Lock()
 
@@ -175,6 +191,22 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._shortcuts_visible = visible
             self._refresh()
 
+    def scroll_log_up(self) -> bool:
+        with self._lock:
+            return self._scroll_log(1)
+
+    def scroll_log_down(self) -> bool:
+        with self._lock:
+            return self._scroll_log(-1)
+
+    def reset_log_scroll(self) -> bool:
+        with self._lock:
+            if self._log_scroll_offset == 0:
+                return False
+            self._log_scroll_offset = 0
+            self._refresh()
+            return True
+
     def streamlit_subprocess_columns(self) -> int | None:
         # Streamlit formats Rich tracebacks before we can render them without a
         # source prefix, so give it the prefix-less log panel width.
@@ -188,7 +220,11 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
     def log(self, source: str, line: str) -> None:
         with self._lock:
+            preserve_view = self._log_scroll_offset > 0
             self._logs.append((source, line))
+            if preserve_view:
+                self._log_scroll_offset += 1
+            self._clamp_log_scroll_offset()
             self._refresh()
 
     def set_state(
@@ -207,6 +243,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._shortcuts_visible = shortcuts_visible
             self._logs.clear()
             self._logs.extend(logs)
+            self._log_scroll_offset = 0
             self._refresh()
 
     def _refresh(self) -> None:
@@ -280,6 +317,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         log_panel_height = panel_height or self._layout_heights()[1]
         available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
         logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        self._clamp_log_scroll_offset(log_count=len(logs), available_rows=available_rows)
         return self._select_visible_logs(logs, available_rows=available_rows)
 
     def _select_visible_logs(
@@ -290,6 +328,10 @@ class RichRuntimeDisplay(RuntimeDisplay):
     ) -> list[tuple[str, str]]:
         if len(logs) <= available_rows:
             return logs
+
+        if self._log_scroll_offset:
+            end = len(logs) - self._log_scroll_offset
+            return logs[max(0, end - available_rows) : end]
 
         traceback_spans = self._streamlit_traceback_spans(logs)
         traceback_span = traceback_spans[-1] if traceback_spans else None
@@ -332,6 +374,29 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
         arranged_logs.extend(deferred_logs)
         return arranged_logs
+
+    def _scroll_log(self, rows: int) -> bool:
+        old_offset = self._log_scroll_offset
+        self._log_scroll_offset += rows
+        self._clamp_log_scroll_offset()
+        if self._log_scroll_offset == old_offset:
+            return False
+        self._refresh()
+        return True
+
+    def _clamp_log_scroll_offset(
+        self,
+        *,
+        log_count: int | None = None,
+        available_rows: int | None = None,
+    ) -> None:
+        if log_count is None:
+            log_count = len(self._move_interleaved_logs_after_tracebacks(list(self._logs)))
+        if available_rows is None:
+            available_rows = max(1, self._layout_heights()[1] - self._PANEL_FRAME_ROWS)
+
+        max_offset = max(0, log_count - available_rows)
+        self._log_scroll_offset = min(max(0, self._log_scroll_offset), max_offset)
 
     def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
         raw_indexes: set[int] = set()
@@ -428,6 +493,11 @@ class RichRuntimeDisplay(RuntimeDisplay):
         shortcuts.append(" restart Streamlit   ")
         shortcuts.append("t", style="bold cyan")
         shortcuts.append(" toggle display   ")
+        shortcuts.append("j/k", style="bold yellow")
+        shortcuts.append(" Ctrl+n/p ↑/↓", style="yellow")
+        shortcuts.append(" scroll logs   ")
+        shortcuts.append("Esc", style="bold yellow")
+        shortcuts.append(" latest   ")
         shortcuts.append("Ctrl+C", style="bold red")
         shortcuts.append(" stop all")
         return Panel(shortcuts, title="Shortcuts", border_style="green", height=height)
@@ -563,6 +633,18 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._active_display.set_shortcuts_visible(visible)
+
+    def scroll_log_up(self) -> bool:
+        with self._lock:
+            return self._active_display.scroll_log_up()
+
+    def scroll_log_down(self) -> bool:
+        with self._lock:
+            return self._active_display.scroll_log_down()
+
+    def reset_log_scroll(self) -> bool:
+        with self._lock:
+            return self._active_display.reset_log_scroll()
 
     def streamlit_subprocess_columns(self) -> int | None:
         with self._lock:
