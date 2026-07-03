@@ -267,13 +267,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         raw_traceback_indexes = self._raw_streamlit_traceback_indexes(visible_logs)
         for index, (source, line) in enumerate(visible_logs):
             if index in raw_traceback_indexes:
-                line_width = self._log_panel_content_width()
-                lines.append(
-                    self._format_log_line(
-                        self._format_raw_streamlit_traceback_line(line),
-                        width=line_width,
-                    ).ljust(line_width)
-                )
+                lines.append(self._format_raw_streamlit_traceback_line(line))
             else:
                 lines.append(f"{source:>11} ", style=self._source_style(source))
                 lines.append(self._format_log_line(line, width=self._log_line_width()))
@@ -379,10 +373,35 @@ class RichRuntimeDisplay(RuntimeDisplay):
             return False
         return any(char in _ANSI_ESCAPE_RE.sub("", line) for char in self._RICH_TRACEBACK_CHARS)
 
-    def _format_raw_streamlit_traceback_line(self, line: str) -> str:
-        line = _ANSI_ESCAPE_RE.sub("", line)
-        line = re.sub(r"^\s*│ ?", "", line)
-        return re.sub(r"\s+│\s*$", "", line).rstrip()
+    def _format_raw_streamlit_traceback_line(self, line: str) -> Text:
+        text = Text.from_ansi(line)
+        plain = text.plain
+        start = 0
+        end = len(plain)
+
+        leading_border_match = re.match(r"^\s*│ ?", plain)
+        if leading_border_match is not None:
+            start = leading_border_match.end()
+
+        trailing_border_match = re.search(r"\s+│\s*$", plain)
+        if trailing_border_match is not None and trailing_border_match.start() >= start:
+            end = trailing_border_match.start()
+
+        end = min(end, len(plain[:end].rstrip()))
+        formatted_text = text[start:end]
+        return self._format_raw_streamlit_traceback_text(formatted_text)
+
+    def _format_raw_streamlit_traceback_text(self, text: Text) -> Text:
+        width = self._log_panel_content_width()
+        formatted_text = text.copy()
+        if len(formatted_text.plain) > width:
+            if width <= 3:
+                formatted_text = Text("." * width)
+            else:
+                formatted_text = formatted_text[: width - 3]
+                formatted_text.append("...")
+        formatted_text.pad_right(width - len(formatted_text.plain))
+        return formatted_text
 
     def _format_log_line(self, line: str, *, width: int) -> str:
         line = line.replace("\n", r"\n").replace("\r", r"\r")

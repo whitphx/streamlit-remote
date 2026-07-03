@@ -180,19 +180,17 @@ def test_rich_runtime_display_preserves_streamlit_traceback_frame() -> None:
 
     console.print(display._render_log_panel(height=8))
     rendered = output.getvalue()
-    formatted_line = display._format_log_line(
-        display._format_raw_streamlit_traceback_line(
-            "│ /app/example.py:8 in <module>                     │"
-        ),
-        width=display._log_panel_content_width(),
-    ).ljust(display._log_panel_content_width())
+    formatted_line = display._format_raw_streamlit_traceback_line(
+        "│ \x1b[31m/app/example.py:8 in <module>\x1b[0m                     │"
+    )
 
     assert "streamlit   /app/example.py" not in rendered
     assert "/app/example.py:8 in <module>" in rendered
     assert "in <module>                     │" not in rendered
     assert "❱  8 │   raise RuntimeError(" in rendered
-    assert len(formatted_line) == display._log_panel_content_width()
-    assert formatted_line.endswith(" ")
+    assert len(formatted_line.plain) == display._log_panel_content_width()
+    assert formatted_line.plain.endswith(" ")
+    assert formatted_line.spans
     assert rendered.index("RuntimeError: boom") < rendered.index("cloudflared")
     assert display._is_streamlit_traceback_marker("streamlit", "\x1b[31m│\x1b[0m /app")
 
