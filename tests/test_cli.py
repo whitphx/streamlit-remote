@@ -948,6 +948,7 @@ def test_cbreak_shortcut_listener_discards_incomplete_escape_sequence() -> None:
 
     try:
         with os.fdopen(slave_fd, "r", encoding="utf-8", closefd=False) as slave:
+
             def write_shortcut() -> None:
                 time.sleep(0.05)
                 os.write(master_fd, b"\x1b[")
