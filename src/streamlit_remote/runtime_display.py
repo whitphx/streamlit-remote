@@ -176,6 +176,8 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
     def subprocess_columns(self, source: str) -> int | None:
         if source == "streamlit":
+            # Streamlit may emit preformatted Rich tracebacks that we render
+            # without a source prefix.
             return self._log_panel_content_width()
         return self._log_line_width()
 
