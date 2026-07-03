@@ -216,20 +216,20 @@ def test_rich_runtime_display_keeps_traceback_visible_after_tunnel_log_burst() -
     assert "precheck status=pass" in rendered
 
 
-def test_rich_runtime_display_reports_subprocess_width_for_log_column() -> None:
+def test_rich_runtime_display_reports_streamlit_subprocess_width_for_log_panel() -> None:
     console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
     display = RichRuntimeDisplay(console=console)
 
-    assert display.subprocess_columns("streamlit") == 36
+    assert display.streamlit_subprocess_columns() == 36
 
 
-def test_switchable_runtime_display_reports_active_subprocess_width() -> None:
+def test_switchable_runtime_display_reports_active_streamlit_subprocess_width() -> None:
     console = Console(file=StringIO(), width=40, height=12, force_terminal=True)
     display = SwitchableRuntimeDisplay(
         RichRuntimeDisplay(console=console),
         PlainRuntimeDisplay(output=StringIO(), error_output=StringIO()),
     )
 
-    assert display.subprocess_columns("streamlit") == 36
+    assert display.streamlit_subprocess_columns() == 36
     display.switch_to_plain()
-    assert display.subprocess_columns("streamlit") is None
+    assert display.streamlit_subprocess_columns() is None

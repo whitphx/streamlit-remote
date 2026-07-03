@@ -38,7 +38,7 @@ class RuntimeDisplay(Protocol):
 
     def set_shortcuts_visible(self, visible: bool) -> None: ...
 
-    def subprocess_columns(self, source: str) -> int | None: ...
+    def streamlit_subprocess_columns(self) -> int | None: ...
 
     def info(self, message: str) -> None: ...
 
@@ -86,7 +86,7 @@ class PlainRuntimeDisplay(RuntimeDisplay):
             self.info("Runtime shortcuts:")
             self.info("  r: restart Streamlit while keeping the tunnel running")
 
-    def subprocess_columns(self, source: str) -> int | None:
+    def streamlit_subprocess_columns(self) -> int | None:
         return None
 
     def info(self, message: str) -> None:
@@ -175,12 +175,10 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._shortcuts_visible = visible
             self._refresh()
 
-    def subprocess_columns(self, source: str) -> int | None:
-        if source == STREAMLIT_SOURCE:
-            # Streamlit may emit preformatted Rich tracebacks that we render
-            # without a source prefix.
-            return self._log_panel_content_width()
-        return self._log_line_width()
+    def streamlit_subprocess_columns(self) -> int | None:
+        # Streamlit formats Rich tracebacks before we can render them without a
+        # source prefix, so give it the prefix-less log panel width.
+        return self._log_panel_content_width()
 
     def info(self, message: str) -> None:
         self.log("st-remote", message)
@@ -293,7 +291,8 @@ class RichRuntimeDisplay(RuntimeDisplay):
         if len(logs) <= available_rows:
             return logs
 
-        traceback_span = self._latest_streamlit_traceback_span(logs)
+        traceback_spans = self._streamlit_traceback_spans(logs)
+        traceback_span = traceback_spans[-1] if traceback_spans else None
         if traceback_span is None:
             return logs[-available_rows:]
 
@@ -339,15 +338,6 @@ class RichRuntimeDisplay(RuntimeDisplay):
         for start, end in self._streamlit_traceback_spans(logs):
             raw_indexes.update(range(start, end))
         return raw_indexes
-
-    def _latest_streamlit_traceback_span(
-        self,
-        logs: list[tuple[str, str]],
-    ) -> tuple[int, int] | None:
-        spans = self._streamlit_traceback_spans(logs)
-        if not spans:
-            return None
-        return spans[-1]
 
     def _streamlit_traceback_spans(self, logs: list[tuple[str, str]]) -> list[tuple[int, int]]:
         marker_indexes = [
@@ -574,9 +564,9 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
             self._shortcuts_visible = visible
             self._active_display.set_shortcuts_visible(visible)
 
-    def subprocess_columns(self, source: str) -> int | None:
+    def streamlit_subprocess_columns(self) -> int | None:
         with self._lock:
-            return self._active_display.subprocess_columns(source)
+            return self._active_display.streamlit_subprocess_columns()
 
     def info(self, message: str) -> None:
         with self._lock:

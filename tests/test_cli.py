@@ -948,7 +948,7 @@ def test_run_passes_display_columns_to_streamlit_process(
         info=lambda message: None,
         error=lambda message: None,
         log=lambda source, line: None,
-        subprocess_columns=lambda source: 33,
+        streamlit_subprocess_columns=lambda: 33,
     )
 
     def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
