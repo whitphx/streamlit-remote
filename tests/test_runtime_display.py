@@ -129,14 +129,14 @@ def test_rich_runtime_display_limits_visible_log_lines() -> None:
 
 def test_rich_runtime_display_scrolls_log_window() -> None:
     output = StringIO()
-    console = Console(file=output, width=80, height=12, force_terminal=True)
+    console = Console(file=output, width=80, height=13, force_terminal=True)
     display = RichRuntimeDisplay(console=console, max_log_lines=100)
 
     for index in range(12):
         display.log("streamlit", f"line-{index}")
 
     assert display.scroll_log_up()
-    console.print(display._render_log_panel(height=6))
+    console.print(display._render_log_panel())
     rendered = output.getvalue()
 
     assert "line-7" in rendered
@@ -145,7 +145,7 @@ def test_rich_runtime_display_scrolls_log_window() -> None:
     output.truncate(0)
     output.seek(0)
     assert display.scroll_log_down()
-    console.print(display._render_log_panel(height=6))
+    console.print(display._render_log_panel())
     rendered = output.getvalue()
 
     assert "line-11" in rendered
@@ -153,7 +153,7 @@ def test_rich_runtime_display_scrolls_log_window() -> None:
 
 def test_rich_runtime_display_preserves_scrolled_log_window_after_new_logs() -> None:
     output = StringIO()
-    console = Console(file=output, width=80, height=12, force_terminal=True)
+    console = Console(file=output, width=80, height=13, force_terminal=True)
     display = RichRuntimeDisplay(console=console, max_log_lines=100)
 
     for index in range(12):
@@ -161,16 +161,55 @@ def test_rich_runtime_display_preserves_scrolled_log_window_after_new_logs() -> 
 
     assert display.scroll_log_up()
     display.log("streamlit", "line-12")
-    console.print(display._render_log_panel(height=6))
+    console.print(display._render_log_panel())
     rendered = output.getvalue()
 
     assert "line-7" in rendered
     assert "line-12" not in rendered
 
 
+def test_rich_runtime_display_scrolls_from_traceback_pinned_window() -> None:
+    console = Console(file=StringIO(), width=80, height=16, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=200)
+
+    display.log("streamlit", "")
+    display.log("streamlit", "/app/example.py:8 in <module>")
+    display.log("streamlit", "❱  8 │   raise RuntimeError(")
+    display.log("streamlit", "─────────────────────────────────────────────────────")
+    display.log("streamlit", "RuntimeError: boom")
+    for index in range(100):
+        display.log("cloudflared", f"precheck status=pass target={index}")
+
+    pinned_logs = display._visible_logs()
+
+    assert "RuntimeError: boom" in [line for _, line in pinned_logs]
+    assert not display.scroll_log_up()
+    assert display._visible_logs() == pinned_logs
+
+
+def test_rich_runtime_display_preserves_deferred_tail_window_after_streamlit_log() -> None:
+    console = Console(file=StringIO(), width=80, height=13, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=100)
+
+    display.log("streamlit", "")
+    display.log("streamlit", "│ /app/example.py:8 in <module> │")
+    display.log("streamlit", "❱  8 │ raise RuntimeError(")
+    display.log("streamlit", "────────────────────")
+    display.log("streamlit", "RuntimeError: boom")
+    for index in range(8):
+        display.log("cloudflared", f"tunnel msg {index}")
+    for _ in range(5):
+        assert display.scroll_log_down()
+
+    visible_before = display._visible_logs()
+    display.log("streamlit", "new Streamlit log")
+
+    assert display._visible_logs() == visible_before
+
+
 def test_rich_runtime_display_resets_log_scroll_to_latest() -> None:
     output = StringIO()
-    console = Console(file=output, width=80, height=12, force_terminal=True)
+    console = Console(file=output, width=80, height=13, force_terminal=True)
     display = RichRuntimeDisplay(console=console, max_log_lines=100)
 
     for index in range(12):
@@ -178,7 +217,7 @@ def test_rich_runtime_display_resets_log_scroll_to_latest() -> None:
 
     assert display.scroll_log_up()
     assert display.reset_log_scroll()
-    console.print(display._render_log_panel(height=6))
+    console.print(display._render_log_panel())
     rendered = output.getvalue()
 
     assert "line-11" in rendered
@@ -206,6 +245,19 @@ def test_rich_runtime_display_uses_alternate_screen() -> None:
         assert display._live.vertical_overflow == "crop"
     finally:
         display.stop()
+
+
+def test_rich_runtime_display_shortcuts_fit_width_80() -> None:
+    output = StringIO()
+    console = Console(file=output, width=80, height=16, force_terminal=True, color_system=None)
+    display = RichRuntimeDisplay(console=console)
+
+    display.set_shortcuts_visible(True)
+    console.print(display._render_shortcuts_panel(height=3))
+    rendered = output.getvalue()
+
+    assert "Esc latest" in rendered
+    assert "Ctrl+C stop" in rendered
 
 
 def test_rich_runtime_display_truncates_long_log_lines() -> None:

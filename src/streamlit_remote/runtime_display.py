@@ -134,7 +134,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         self._local_url: str | None = None
         self._remote_url: str | None = None
         self._shortcuts_visible = False
-        self._log_scroll_offset = 0
+        self._log_window_start: int | None = None
         self._live: Live | None = None
         self._lock = threading.Lock()
 
@@ -201,9 +201,9 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
     def reset_log_scroll(self) -> bool:
         with self._lock:
-            if self._log_scroll_offset == 0:
+            if self._log_window_start is None:
                 return False
-            self._log_scroll_offset = 0
+            self._log_window_start = None
             self._refresh()
             return True
 
@@ -220,11 +220,10 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
     def log(self, source: str, line: str) -> None:
         with self._lock:
-            preserve_view = self._log_scroll_offset > 0
+            anchor = self._log_window_anchor()
             self._logs.append((source, line))
-            if preserve_view:
-                self._log_scroll_offset += 1
-            self._clamp_log_scroll_offset()
+            if anchor is not None:
+                self._log_window_start = self._find_log_window_anchor(anchor)
             self._refresh()
 
     def set_state(
@@ -243,7 +242,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._shortcuts_visible = shortcuts_visible
             self._logs.clear()
             self._logs.extend(logs)
-            self._log_scroll_offset = 0
+            self._log_window_start = None
             self._refresh()
 
     def _refresh(self) -> None:
@@ -317,7 +316,6 @@ class RichRuntimeDisplay(RuntimeDisplay):
         log_panel_height = panel_height or self._layout_heights()[1]
         available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
         logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
-        self._clamp_log_scroll_offset(log_count=len(logs), available_rows=available_rows)
         return self._select_visible_logs(logs, available_rows=available_rows)
 
     def _select_visible_logs(
@@ -329,9 +327,14 @@ class RichRuntimeDisplay(RuntimeDisplay):
         if len(logs) <= available_rows:
             return logs
 
-        if self._log_scroll_offset:
-            end = len(logs) - self._log_scroll_offset
-            return logs[max(0, end - available_rows) : end]
+        if self._log_window_start is not None:
+            start = self._clamped_log_window_start(
+                self._log_window_start,
+                log_count=len(logs),
+                available_rows=available_rows,
+            )
+            self._log_window_start = start
+            return logs[start : start + available_rows]
 
         traceback_spans = self._streamlit_traceback_spans(logs)
         traceback_span = traceback_spans[-1] if traceback_spans else None
@@ -376,27 +379,82 @@ class RichRuntimeDisplay(RuntimeDisplay):
         return arranged_logs
 
     def _scroll_log(self, rows: int) -> bool:
-        old_offset = self._log_scroll_offset
-        self._log_scroll_offset += rows
-        self._clamp_log_scroll_offset()
-        if self._log_scroll_offset == old_offset:
+        logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        available_rows = max(1, self._layout_heights()[1] - self._PANEL_FRAME_ROWS)
+        if len(logs) <= available_rows:
             return False
+
+        old_start = self._current_log_window_start(logs, available_rows=available_rows)
+        new_start = self._clamped_log_window_start(
+            old_start - rows,
+            log_count=len(logs),
+            available_rows=available_rows,
+        )
+        if new_start == old_start:
+            return False
+        self._log_window_start = new_start
         self._refresh()
         return True
 
-    def _clamp_log_scroll_offset(
+    def _current_log_window_start(
         self,
+        logs: list[tuple[str, str]],
         *,
-        log_count: int | None = None,
-        available_rows: int | None = None,
-    ) -> None:
-        if log_count is None:
-            log_count = len(self._move_interleaved_logs_after_tracebacks(list(self._logs)))
-        if available_rows is None:
-            available_rows = max(1, self._layout_heights()[1] - self._PANEL_FRAME_ROWS)
+        available_rows: int,
+    ) -> int:
+        if self._log_window_start is not None:
+            return self._clamped_log_window_start(
+                self._log_window_start,
+                log_count=len(logs),
+                available_rows=available_rows,
+            )
 
-        max_offset = max(0, log_count - available_rows)
-        self._log_scroll_offset = min(max(0, self._log_scroll_offset), max_offset)
+        visible_logs = self._select_visible_logs(logs, available_rows=available_rows)
+        if not visible_logs:
+            return 0
+        first_visible_log = visible_logs[0]
+        for index, log in enumerate(logs):
+            if log == first_visible_log:
+                return index
+        return max(0, len(logs) - available_rows)
+
+    def _clamped_log_window_start(
+        self,
+        start: int,
+        *,
+        log_count: int,
+        available_rows: int,
+    ) -> int:
+        max_start = max(0, log_count - available_rows)
+        return min(max(0, start), max_start)
+
+    def _log_window_anchor(self) -> tuple[tuple[str, str], int] | None:
+        if self._log_window_start is None:
+            return None
+
+        logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        if not logs:
+            return None
+        start = self._clamped_log_window_start(
+            self._log_window_start,
+            log_count=len(logs),
+            available_rows=max(1, self._layout_heights()[1] - self._PANEL_FRAME_ROWS),
+        )
+        log = logs[start]
+        occurrence = sum(1 for candidate in logs[: start + 1] if candidate == log)
+        return log, occurrence
+
+    def _find_log_window_anchor(self, anchor: tuple[tuple[str, str], int]) -> int | None:
+        log, occurrence = anchor
+        seen = 0
+        for index, candidate in enumerate(
+            self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        ):
+            if candidate == log:
+                seen += 1
+                if seen == occurrence:
+                    return index
+        return self._log_window_start
 
     def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
         raw_indexes: set[int] = set()
@@ -490,16 +548,16 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
         shortcuts = Text()
         shortcuts.append("r", style="bold green")
-        shortcuts.append(" restart Streamlit   ")
+        shortcuts.append(" restart  ")
         shortcuts.append("t", style="bold cyan")
-        shortcuts.append(" toggle display   ")
+        shortcuts.append(" display  ")
         shortcuts.append("j/k", style="bold yellow")
-        shortcuts.append(" Ctrl+n/p ↑/↓", style="yellow")
-        shortcuts.append(" scroll logs   ")
+        shortcuts.append(" ↑/↓ C-n/p", style="yellow")
+        shortcuts.append(" scroll  ")
         shortcuts.append("Esc", style="bold yellow")
-        shortcuts.append(" latest   ")
+        shortcuts.append(" latest  ")
         shortcuts.append("Ctrl+C", style="bold red")
-        shortcuts.append(" stop all")
+        shortcuts.append(" stop")
         return Panel(shortcuts, title="Shortcuts", border_style="green", height=height)
 
     def _source_style(self, source: str) -> str:
