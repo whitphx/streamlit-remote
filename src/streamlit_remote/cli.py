@@ -31,7 +31,7 @@ from streamlit_remote.providers.ngrok import (
     planned_managed_oauth_policy,
     prepare_managed_oauth_policy,
 )
-from streamlit_remote.runtime_display import make_runtime_display
+from streamlit_remote.runtime_display import STREAMLIT_SOURCE, make_runtime_display
 from streamlit_remote.server import LocalServerConfig, is_port_available, wait_until_listening
 
 
@@ -421,7 +421,16 @@ def run(namespace: argparse.Namespace) -> int:
 
     def start_streamlit_process() -> ManagedProcess:
         display.set_status("Streamlit", "starting")
-        return start_logged_process(streamlit_command, "streamlit", write_log=display.log)
+        streamlit_env: dict[str, str] = {}
+        streamlit_columns = display.streamlit_subprocess_columns()
+        if streamlit_columns is not None:
+            streamlit_env["COLUMNS"] = str(streamlit_columns)
+        return start_logged_process(
+            streamlit_command,
+            STREAMLIT_SOURCE,
+            write_log=display.log,
+            env=streamlit_env or None,
+        )
 
     def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
         display.set_status("Streamlit", "restarting")

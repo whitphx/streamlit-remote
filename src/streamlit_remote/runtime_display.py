@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import threading
 from collections import deque
@@ -11,6 +12,9 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+STREAMLIT_SOURCE = "streamlit"
 
 
 class RuntimeDisplay(Protocol):
@@ -33,6 +37,8 @@ class RuntimeDisplay(Protocol):
     def set_status(self, component: str, status: str) -> None: ...
 
     def set_shortcuts_visible(self, visible: bool) -> None: ...
+
+    def streamlit_subprocess_columns(self) -> int | None: ...
 
     def info(self, message: str) -> None: ...
 
@@ -80,6 +86,9 @@ class PlainRuntimeDisplay(RuntimeDisplay):
             self.info("Runtime shortcuts:")
             self.info("  r: restart Streamlit while keeping the tunnel running")
 
+    def streamlit_subprocess_columns(self) -> int | None:
+        return None
+
     def info(self, message: str) -> None:
         print(message, file=self._output, flush=True)
 
@@ -97,6 +106,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
     _PANEL_HORIZONTAL_OVERHEAD = 4
     _LOG_SOURCE_WIDTH = 11
     _LOG_SOURCE_SEPARATOR_WIDTH = 1
+    _RICH_TRACEBACK_CHARS = frozenset("╭╮╰╯│─")
 
     def __init__(
         self,
@@ -164,6 +174,11 @@ class RichRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._refresh()
+
+    def streamlit_subprocess_columns(self) -> int | None:
+        # Streamlit formats Rich tracebacks before we can render them without a
+        # source prefix, so give it the prefix-less log panel width.
+        return self._log_panel_content_width()
 
     def info(self, message: str) -> None:
         self.log("st-remote", message)
@@ -250,9 +265,13 @@ class RichRuntimeDisplay(RuntimeDisplay):
 
         lines = Text()
         visible_logs = self._visible_logs(panel_height=panel_height)
+        raw_traceback_indexes = self._raw_streamlit_traceback_indexes(visible_logs)
         for index, (source, line) in enumerate(visible_logs):
-            lines.append(f"{source:>11} ", style=self._source_style(source))
-            lines.append(self._format_log_line(line))
+            if index in raw_traceback_indexes:
+                lines.append(self._format_raw_streamlit_traceback_line(line))
+            else:
+                lines.append(f"{source:>11} ", style=self._source_style(source))
+                lines.append(self._format_log_line(line, width=self._log_line_width()))
             if index < len(visible_logs) - 1:
                 lines.append("\n")
         return Panel(lines, title="Logs", height=panel_height)
@@ -260,23 +279,141 @@ class RichRuntimeDisplay(RuntimeDisplay):
     def _visible_logs(self, *, panel_height: int | None = None) -> list[tuple[str, str]]:
         log_panel_height = panel_height or self._layout_heights()[1]
         available_rows = max(1, log_panel_height - self._PANEL_FRAME_ROWS)
-        return list(self._logs)[-available_rows:]
+        logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
+        return self._select_visible_logs(logs, available_rows=available_rows)
 
-    def _format_log_line(self, line: str) -> str:
+    def _select_visible_logs(
+        self,
+        logs: list[tuple[str, str]],
+        *,
+        available_rows: int,
+    ) -> list[tuple[str, str]]:
+        if len(logs) <= available_rows:
+            return logs
+
+        traceback_spans = self._streamlit_traceback_spans(logs)
+        traceback_span = traceback_spans[-1] if traceback_spans else None
+        if traceback_span is None:
+            return logs[-available_rows:]
+
+        start, end = traceback_span
+        if any(source == STREAMLIT_SOURCE for source, _ in logs[end:]):
+            return logs[-available_rows:]
+
+        traceback_logs = logs[start:end]
+        if len(traceback_logs) >= available_rows:
+            return traceback_logs[-available_rows:]
+
+        following_rows = available_rows - len(traceback_logs)
+        following_logs = logs[end:][-following_rows:] if following_rows else []
+        selected_logs = [*traceback_logs, *following_logs]
+
+        preceding_rows = available_rows - len(selected_logs)
+        if preceding_rows:
+            selected_logs = [*logs[:start][-preceding_rows:], *selected_logs]
+        return selected_logs
+
+    def _move_interleaved_logs_after_tracebacks(
+        self,
+        logs: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        arranged_logs: list[tuple[str, str]] = []
+        deferred_logs: list[tuple[str, str]] = []
+        in_streamlit_traceback = False
+
+        for source, line in logs:
+            if self._is_streamlit_traceback_marker(source, line):
+                in_streamlit_traceback = True
+                arranged_logs.append((source, line))
+            elif in_streamlit_traceback and source != STREAMLIT_SOURCE:
+                deferred_logs.append((source, line))
+            else:
+                arranged_logs.append((source, line))
+
+        arranged_logs.extend(deferred_logs)
+        return arranged_logs
+
+    def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
+        raw_indexes: set[int] = set()
+        for start, end in self._streamlit_traceback_spans(logs):
+            raw_indexes.update(range(start, end))
+        return raw_indexes
+
+    def _streamlit_traceback_spans(self, logs: list[tuple[str, str]]) -> list[tuple[int, int]]:
+        marker_indexes = [
+            index
+            for index, (source, line) in enumerate(logs)
+            if self._is_streamlit_traceback_marker(source, line)
+        ]
+        spans: list[tuple[int, int]] = []
+        for marker_index in marker_indexes:
+            start = marker_index
+            while start > 0 and logs[start - 1][0] == STREAMLIT_SOURCE:
+                start -= 1
+
+            end = marker_index + 1
+            while end < len(logs) and logs[end][0] == STREAMLIT_SOURCE:
+                end += 1
+
+            if spans and start <= spans[-1][1]:
+                spans[-1] = (spans[-1][0], max(spans[-1][1], end))
+            else:
+                spans.append((start, end))
+        return spans
+
+    def _is_streamlit_traceback_marker(self, source: str, line: str) -> bool:
+        if source != STREAMLIT_SOURCE:
+            return False
+        return any(char in _ANSI_ESCAPE_RE.sub("", line) for char in self._RICH_TRACEBACK_CHARS)
+
+    def _format_raw_streamlit_traceback_line(self, line: str) -> Text:
+        text = Text.from_ansi(line)
+        plain = text.plain
+        start = 0
+        end = len(plain)
+
+        leading_border_match = re.match(r"^\s*│ ?", plain)
+        if leading_border_match is not None:
+            start = leading_border_match.end()
+
+        trailing_border_match = re.search(r"\s+│\s*$", plain)
+        if trailing_border_match is not None and trailing_border_match.start() >= start:
+            end = trailing_border_match.start()
+
+        end = min(end, len(plain[:end].rstrip()))
+        formatted_text = text[start:end]
+        return self._format_raw_streamlit_traceback_text(formatted_text)
+
+    def _format_raw_streamlit_traceback_text(self, text: Text) -> Text:
+        width = self._log_panel_content_width()
+        formatted_text = text.copy()
+        if len(formatted_text.plain) > width:
+            if width <= 3:
+                formatted_text = Text("." * width)
+            else:
+                formatted_text = formatted_text[: width - 3]
+                formatted_text.append("...")
+        formatted_text.pad_right(width - len(formatted_text.plain))
+        return formatted_text
+
+    def _format_log_line(self, line: str, *, width: int) -> str:
         line = line.replace("\n", r"\n").replace("\r", r"\r")
-        line_width = self._log_line_width()
-        if len(line) <= line_width:
+        if len(line) <= width:
             return line
-        if line_width <= 3:
-            return "." * line_width
-        return f"{line[: line_width - 3]}..."
+        if width <= 3:
+            return "." * width
+        return f"{line[: width - 3]}..."
 
     def _log_line_width(self) -> int:
-        content_width = self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD
         return max(
             1,
-            content_width - self._LOG_SOURCE_WIDTH - self._LOG_SOURCE_SEPARATOR_WIDTH,
+            self._log_panel_content_width()
+            - self._LOG_SOURCE_WIDTH
+            - self._LOG_SOURCE_SEPARATOR_WIDTH,
         )
+
+    def _log_panel_content_width(self) -> int:
+        return max(1, self._console.size.width - self._PANEL_HORIZONTAL_OVERHEAD)
 
     def _render_shortcuts_panel(self, *, height: int | None = None) -> Panel:
         if not self._shortcuts_visible:
@@ -296,7 +433,7 @@ class RichRuntimeDisplay(RuntimeDisplay):
         return Panel(shortcuts, title="Shortcuts", border_style="green", height=height)
 
     def _source_style(self, source: str) -> str:
-        if source == "streamlit":
+        if source == STREAMLIT_SOURCE:
             return "blue"
         if source in {"cloudflared", "ngrok"}:
             return "magenta"
@@ -426,6 +563,10 @@ class SwitchableRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             self._shortcuts_visible = visible
             self._active_display.set_shortcuts_visible(visible)
+
+    def streamlit_subprocess_columns(self) -> int | None:
+        with self._lock:
+            return self._active_display.streamlit_subprocess_columns()
 
     def info(self, message: str) -> None:
         with self._lock:
