@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.7.2'></a>
+## 0.7.2 — 2026-07-03
+
+### Fixed
+
+- Preserve Streamlit Rich traceback frames in the TUI log panel by sizing the subprocess output for the panel and rendering preformatted traceback lines without per-line log prefixes.
+
 <a id='changelog-0.7.1'></a>
 ## 0.7.1 — 2026-07-01
 
