@@ -470,8 +470,6 @@ def test_run_cli_rejects_cloudflared_binary_with_ngrok(
             "ngrok",
             "--cloudflared-binary",
             str(tmp_path / "cloudflared"),
-            "--zrok-binary",
-            str(tmp_path / "zrok"),
         ]
     )
 

@@ -891,9 +891,6 @@ def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial |
 
 
 def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
-    if namespace.provider is None:
-        return None
-
     if namespace.provider == "cloudflare":
         return namespace.cloudflared_binary
 
