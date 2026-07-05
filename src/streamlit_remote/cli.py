@@ -238,9 +238,8 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
     if namespace.zrok_binary is not None and namespace.no_remote:
         raise CliError("`--zrok-binary` requires remote access. Remove `--no-remote`.")
 
-    implied_provider = provider_implied_by_options(namespace)
     if namespace.provider is None:
-        namespace.provider = implied_provider
+        namespace.provider = provider_implied_by_options(namespace)
 
     if namespace.remote_auth != "off" and namespace.provider != "ngrok":
         raise CliError("`--remote-auth` is currently supported only with `--provider ngrok`.")
@@ -913,7 +912,7 @@ def resolve_cli_provider(
     allow_unavailable_default: bool,
 ) -> TunnelProvider:
     if namespace.provider is not None:
-        return get_cli_provider(namespace.provider, selected_tunnel_binary(namespace))
+        return get_provider(namespace.provider, executable=selected_tunnel_binary(namespace))
 
     provider = first_available_provider()
     if provider is not None:
@@ -928,12 +927,6 @@ def resolve_cli_provider(
         "No supported tunnel provider was found on PATH. Install cloudflared, ngrok, "
         "or zrok, or pass `--provider` with the matching binary option."
     )
-
-
-def get_cli_provider(name: str, executable: Path | None) -> TunnelProvider:
-    if executable is None:
-        return get_provider(name)
-    return get_provider(name, executable=executable)
 
 
 def first_available_provider() -> TunnelProvider | None:

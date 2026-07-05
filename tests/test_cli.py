@@ -470,6 +470,8 @@ def test_run_cli_rejects_cloudflared_binary_with_ngrok(
             "ngrok",
             "--cloudflared-binary",
             str(tmp_path / "cloudflared"),
+            "--zrok-binary",
+            str(tmp_path / "zrok"),
         ]
     )
 
@@ -622,7 +624,7 @@ def test_run_cli_reports_missing_cloudflared(
 
     monkeypatch.setattr(cli, "require_streamlit", lambda: None)
     monkeypatch.setattr(cli, "is_port_available", lambda host, port: True)
-    monkeypatch.setattr(cli, "get_provider", lambda name: UnavailableProvider())
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: UnavailableProvider())
 
     exit_code = cli.run_cli([str(app_path), "--provider", "cloudflare"])
 
