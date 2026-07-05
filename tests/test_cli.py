@@ -749,6 +749,91 @@ def test_restart_shortcut_listener_sets_rich_output_event() -> None:
     assert not restart_requested.is_set()
 
 
+def test_restart_shortcut_listener_sets_log_scroll_events() -> None:
+    class TtyInput(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    restart_requested = cli.threading.Event()
+    scrolled: list[str] = []
+    stop_requested = cli.threading.Event()
+
+    thread = cli.start_restart_shortcut_listener(
+        restart_requested,
+        stop_requested,
+        input_stream=TtyInput("k\nj\n"),
+        scroll_log_up=lambda: scrolled.append("up") or True,
+        scroll_log_down=lambda: scrolled.append("down") or True,
+    )
+
+    assert thread is not None
+    thread.join(timeout=1.0)
+    assert scrolled == ["up", "down"]
+    assert not restart_requested.is_set()
+
+
+def test_dispatch_shortcut_sets_log_scroll_events_for_ctrl_and_arrow_keys() -> None:
+    restart_requested = cli.threading.Event()
+    scrolled: list[str] = []
+
+    cli.dispatch_shortcut(
+        "\x10",
+        restart_requested,
+        scroll_log_up=lambda: scrolled.append("up") or True,
+    )
+    cli.dispatch_shortcut(
+        "\x1b[B",
+        restart_requested,
+        scroll_log_down=lambda: scrolled.append("down") or True,
+    )
+
+    assert scrolled == ["up", "down"]
+    assert not restart_requested.is_set()
+
+
+def test_dispatch_shortcut_resets_log_scroll_for_escape() -> None:
+    restart_requested = cli.threading.Event()
+    reset = cli.threading.Event()
+
+    cli.dispatch_shortcut(
+        "\x1b",
+        restart_requested,
+        reset_log_scroll=lambda: reset.set() or True,
+    )
+
+    assert reset.is_set()
+    assert not restart_requested.is_set()
+
+
+def test_dispatch_shortcut_ignores_unbound_keys() -> None:
+    restart_requested = cli.threading.Event()
+    scrolled: list[str] = []
+
+    cli.dispatch_shortcut(
+        "u",
+        restart_requested,
+        scroll_log_up=lambda: scrolled.append("up") or True,
+    )
+    cli.dispatch_shortcut(
+        "d",
+        restart_requested,
+        scroll_log_down=lambda: scrolled.append("down") or True,
+    )
+
+    assert scrolled == []
+    assert not restart_requested.is_set()
+
+
+def test_read_cbreak_shortcut_reads_arrow_key_sequence() -> None:
+    assert cli.read_cbreak_shortcut(StringIO("\x1b[A")) == "\x1b[A"
+    assert cli.read_cbreak_shortcut(StringIO("\x1bOA")) == "\x1bOA"
+
+
+def test_read_cbreak_shortcut_ignores_unrecognized_escape_sequence() -> None:
+    assert cli.read_cbreak_shortcut(StringIO("\x1bOP")) is None
+    assert cli.read_cbreak_shortcut(StringIO("\x1br")) is None
+
+
 def test_restart_shortcut_listener_ignores_non_tty_input() -> None:
     thread = cli.start_restart_shortcut_listener(
         cli.threading.Event(),
@@ -791,6 +876,131 @@ def test_cbreak_shortcut_listener_restores_terminal_settings() -> None:
         assert bool(restored_settings[3] & termios.ICANON) == bool(
             original_settings[3] & termios.ICANON
         )
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
+def test_cbreak_shortcut_listener_reads_arrow_key_sequence() -> None:
+    master_fd, slave_fd = os.openpty()
+    restart_requested = cli.threading.Event()
+    scrolled: list[str] = []
+    stop_requested = cli.threading.Event()
+
+    try:
+        with os.fdopen(slave_fd, "r", encoding="utf-8", closefd=False) as slave:
+
+            def write_shortcut() -> None:
+                time.sleep(0.05)
+                os.write(master_fd, b"\x1b[A")
+                time.sleep(0.05)
+                stop_requested.set()
+
+            writer = threading.Thread(target=write_shortcut)
+            writer.start()
+            assert cli.listen_for_cbreak_shortcuts(
+                slave,
+                restart_requested,
+                stop_requested,
+                scroll_log_up=lambda: scrolled.append("up") or True,
+            )
+            writer.join(timeout=1.0)
+
+        assert scrolled == ["up"]
+        assert not restart_requested.is_set()
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
+def test_cbreak_shortcut_listener_reads_ss3_arrow_key_sequence() -> None:
+    master_fd, slave_fd = os.openpty()
+    restart_requested = cli.threading.Event()
+    scrolled: list[str] = []
+    stop_requested = cli.threading.Event()
+
+    try:
+        with os.fdopen(slave_fd, "r", encoding="utf-8", closefd=False) as slave:
+
+            def write_shortcut() -> None:
+                time.sleep(0.05)
+                os.write(master_fd, b"\x1bOA")
+                time.sleep(0.05)
+                stop_requested.set()
+
+            writer = threading.Thread(target=write_shortcut)
+            writer.start()
+            assert cli.listen_for_cbreak_shortcuts(
+                slave,
+                restart_requested,
+                stop_requested,
+                scroll_log_up=lambda: scrolled.append("up") or True,
+            )
+            writer.join(timeout=1.0)
+
+        assert scrolled == ["up"]
+        assert not restart_requested.is_set()
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
+def test_cbreak_shortcut_listener_discards_incomplete_escape_sequence() -> None:
+    master_fd, slave_fd = os.openpty()
+    restart_requested = cli.threading.Event()
+    reset = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    try:
+        with os.fdopen(slave_fd, "r", encoding="utf-8", closefd=False) as slave:
+
+            def write_shortcut() -> None:
+                time.sleep(0.05)
+                os.write(master_fd, b"\x1b[")
+                time.sleep(0.6)
+                stop_requested.set()
+
+            writer = threading.Thread(target=write_shortcut)
+            writer.start()
+            assert cli.listen_for_cbreak_shortcuts(
+                slave,
+                restart_requested,
+                stop_requested,
+                reset_log_scroll=lambda: reset.set() or True,
+            )
+            writer.join(timeout=1.0)
+
+        assert not reset.is_set()
+        assert not restart_requested.is_set()
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
+
+
+def test_cbreak_shortcut_listener_continues_after_unrecognized_escape_sequence() -> None:
+    master_fd, slave_fd = os.openpty()
+    restart_requested = cli.threading.Event()
+    stop_requested = cli.threading.Event()
+
+    try:
+        with os.fdopen(slave_fd, "r", encoding="utf-8", closefd=False) as slave:
+
+            def write_shortcut() -> None:
+                time.sleep(0.05)
+                os.write(master_fd, b"\x1bOPr")
+                time.sleep(0.05)
+                stop_requested.set()
+
+            writer = threading.Thread(target=write_shortcut)
+            writer.start()
+            assert cli.listen_for_cbreak_shortcuts(
+                slave,
+                restart_requested,
+                stop_requested,
+            )
+            writer.join(timeout=1.0)
+
+        assert restart_requested.is_set()
     finally:
         os.close(master_fd)
         os.close(slave_fd)
@@ -1034,6 +1244,9 @@ def test_run_passes_display_columns_to_streamlit_process(
         set_remote_url=lambda url: None,
         set_status=lambda component, status: None,
         set_shortcuts_visible=lambda visible: None,
+        scroll_log_up=lambda: False,
+        scroll_log_down=lambda: False,
+        reset_log_scroll=lambda: False,
         info=lambda message: None,
         error=lambda message: None,
         log=lambda source, line: None,

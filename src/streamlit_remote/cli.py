@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import select
 import shlex
 import sys
 import threading
@@ -495,6 +497,9 @@ def run(namespace: argparse.Namespace) -> int:
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            scroll_log_up=display.scroll_log_up,
+            scroll_log_down=display.scroll_log_down,
+            reset_log_scroll=display.reset_log_scroll,
         )
         if shortcut_thread is not None:
             display.set_shortcuts_visible(True)
@@ -550,6 +555,9 @@ def start_restart_shortcut_listener(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    scroll_log_up: Callable[[], bool] | None = None,
+    scroll_log_down: Callable[[], bool] | None = None,
+    reset_log_scroll: Callable[[], bool] | None = None,
 ) -> threading.Thread | None:
     stdin = sys.stdin if input_stream is None else input_stream
     if not stdin.isatty():
@@ -563,6 +571,9 @@ def start_restart_shortcut_listener(
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            scroll_log_up=scroll_log_up,
+            scroll_log_down=scroll_log_down,
+            reset_log_scroll=reset_log_scroll,
         ):
             return
 
@@ -573,6 +584,9 @@ def start_restart_shortcut_listener(
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            scroll_log_up=scroll_log_up,
+            scroll_log_down=scroll_log_down,
+            reset_log_scroll=reset_log_scroll,
         )
 
     thread = threading.Thread(
@@ -592,6 +606,9 @@ def listen_for_cbreak_shortcuts(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    scroll_log_up: Callable[[], bool] | None = None,
+    scroll_log_down: Callable[[], bool] | None = None,
+    reset_log_scroll: Callable[[], bool] | None = None,
 ) -> bool:
     try:
         import select
@@ -618,18 +635,20 @@ def listen_for_cbreak_shortcuts(
             if not readable:
                 continue
 
-            try:
-                shortcut = stdin.read(1)
-            except OSError:
-                return True
+            shortcut = read_cbreak_shortcut(stdin, fd=fd)
             if shortcut == "":
                 return True
+            if shortcut is None:
+                continue
             dispatch_shortcut(
                 shortcut,
                 restart_requested,
                 display_toggle_requested=display_toggle_requested,
                 plain_output_requested=plain_output_requested,
                 rich_output_requested=rich_output_requested,
+                scroll_log_up=scroll_log_up,
+                scroll_log_down=scroll_log_down,
+                reset_log_scroll=reset_log_scroll,
             )
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, previous_terminal_settings)
@@ -645,6 +664,9 @@ def listen_for_line_shortcuts(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    scroll_log_up: Callable[[], bool] | None = None,
+    scroll_log_down: Callable[[], bool] | None = None,
+    reset_log_scroll: Callable[[], bool] | None = None,
 ) -> None:
     while not stop_requested.is_set():
         try:
@@ -659,6 +681,9 @@ def listen_for_line_shortcuts(
             display_toggle_requested=display_toggle_requested,
             plain_output_requested=plain_output_requested,
             rich_output_requested=rich_output_requested,
+            scroll_log_up=scroll_log_up,
+            scroll_log_down=scroll_log_down,
+            reset_log_scroll=reset_log_scroll,
         )
 
 
@@ -669,6 +694,9 @@ def dispatch_shortcut(
     display_toggle_requested: threading.Event | None = None,
     plain_output_requested: threading.Event | None = None,
     rich_output_requested: threading.Event | None = None,
+    scroll_log_up: Callable[[], bool] | None = None,
+    scroll_log_down: Callable[[], bool] | None = None,
+    reset_log_scroll: Callable[[], bool] | None = None,
 ) -> None:
     normalized = shortcut.strip().lower()
     if normalized in {"r", "restart"}:
@@ -679,6 +707,87 @@ def dispatch_shortcut(
         plain_output_requested.set()
     elif rich_output_requested is not None and normalized in {"f", "fancy", "tui"}:
         rich_output_requested.set()
+    elif scroll_log_up is not None and normalized in {
+        "\x10",
+        "\x1b[a",
+        "\x1boa",
+        "k",
+        "up",
+        "scroll up",
+    }:
+        scroll_log_up()
+    elif scroll_log_down is not None and normalized in {
+        "\x0e",
+        "\x1b[b",
+        "\x1bob",
+        "j",
+        "down",
+        "scroll down",
+    }:
+        scroll_log_down()
+    elif reset_log_scroll is not None and normalized in {"\x1b", "esc", "latest"}:
+        reset_log_scroll()
+
+
+def read_cbreak_shortcut(stdin: TextIO, *, fd: int | None = None) -> str | None:
+    first_byte = read_cbreak_byte(stdin, fd=fd)
+    if first_byte == b"":
+        return ""
+
+    if first_byte != b"\x1b":
+        return first_byte.decode("utf-8", errors="replace")
+
+    sequence = [first_byte]
+    introducer = read_cbreak_byte(stdin, fd=fd, timeout=0.5)
+    if introducer == b"":
+        return "\x1b"
+    sequence.append(introducer)
+
+    if introducer == b"O":
+        final = read_cbreak_byte(stdin, fd=fd, timeout=0.5)
+        if final in {b"A", b"B"}:
+            sequence.append(final)
+            return b"".join(sequence).decode("ascii")
+        return None
+
+    if introducer != b"[":
+        return None
+
+    while len(sequence) < 6:
+        next_byte = read_cbreak_byte(stdin, fd=fd, timeout=0.5)
+        if next_byte == b"":
+            return None
+        sequence.append(next_byte)
+        if 0x40 <= next_byte[0] <= 0x7E:
+            return b"".join(sequence).decode("ascii", errors="ignore")
+
+    return None
+
+
+def read_cbreak_byte(
+    stdin: TextIO,
+    *,
+    fd: int | None,
+    timeout: float | None = None,
+) -> bytes:
+    if fd is not None:
+        if timeout is not None:
+            try:
+                readable, _, _ = select.select([fd], [], [], timeout)
+            except OSError:
+                return b""
+            if not readable:
+                return b""
+        try:
+            return os.read(fd, 1)
+        except OSError:
+            return b""
+
+    try:
+        char = stdin.read(1)
+    except OSError:
+        return b""
+    return char.encode()
 
 
 def supervise_processes(
