@@ -293,8 +293,7 @@ def provider_implied_by_options(namespace: argparse.Namespace) -> str | None:
     if namespace.zrok_binary is not None:
         implied.append("zrok")
 
-    unique = set(implied)
-    if len(unique) > 1:
+    if len(implied) > 1:
         raise CliError(
             "Provider-specific options conflict. Remove the conflicting options "
             "or pass a matching `--provider`."
