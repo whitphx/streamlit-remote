@@ -217,6 +217,67 @@ def test_run_cli_dry_run_uses_custom_ngrok_binary(
     assert f"{ngrok_binary} http http://localhost:8501" in captured.out
 
 
+def test_run_cli_dry_run_prints_zrok_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "zrok"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "zrok share public --headless http://localhost:8501" in captured.out
+
+
+def test_run_cli_dry_run_uses_custom_zrok_binary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    zrok_binary = tmp_path / "bin" / "zrok"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "zrok",
+            "--zrok-binary",
+            str(zrok_binary),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"{zrok_binary} share public --headless http://localhost:8501" in captured.out
+
+
+def test_run_cli_dry_run_prints_zrok_self_signed_origin_flag(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "zrok",
+            "--https",
+            "self-signed",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "zrok share public --headless --insecure https://localhost:8501" in captured.out
+
+
 def test_run_cli_dry_run_prints_ngrok_off_log_command(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -384,6 +445,27 @@ def test_run_cli_rejects_cloudflared_binary_with_ngrok(
     assert "`--cloudflared-binary` can only be used with `--provider cloudflare`" in (
         capsys.readouterr().err
     )
+
+
+def test_run_cli_rejects_zrok_binary_with_ngrok(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--zrok-binary",
+            str(tmp_path / "zrok"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "`--zrok-binary` can only be used with `--provider zrok`" in capsys.readouterr().err
 
 
 def test_run_cli_rejects_mkcert_binary_without_mkcert_https(
@@ -559,6 +641,13 @@ def test_should_print_tunnel_line_filters_by_level() -> None:
     assert not cli.should_print_tunnel_line("lvl=warn msg=problem", "error")
     assert cli.should_print_tunnel_line("lvl=error msg=problem", "error")
     assert not cli.should_print_tunnel_line("lvl=error msg=problem", "off")
+
+
+def test_should_print_tunnel_line_filters_json_log_levels() -> None:
+    assert cli.should_print_tunnel_line('{"level":"WARN","msg":"problem"}', "warn")
+    assert cli.should_print_tunnel_line('{"level":"ERROR","msg":"problem"}', "warn")
+    assert not cli.should_print_tunnel_line('{"level":"WARN","msg":"problem"}', "error")
+    assert cli.should_print_tunnel_line('{"level":"ERROR","msg":"problem"}', "error")
 
 
 def test_open_browser_uses_webbrowser(monkeypatch: pytest.MonkeyPatch) -> None:
