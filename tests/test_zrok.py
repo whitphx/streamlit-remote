@@ -29,6 +29,18 @@ def test_build_zrok_command_rewrites_any_address_host() -> None:
     ]
 
 
+def test_build_zrok_command_rewrites_ipv6_any_address_host() -> None:
+    provider = ZrokProvider()
+
+    assert provider.build_command("http://[::]:8501") == [
+        "zrok",
+        "share",
+        "public",
+        "--headless",
+        "http://[::1]:8501",
+    ]
+
+
 def test_build_zrok_command_with_custom_binary() -> None:
     provider = ZrokProvider(executable=Path("/opt/zrok"))
 

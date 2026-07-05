@@ -13,8 +13,13 @@ class LocalServerConfig:
 
     @property
     def url(self) -> str:
-        host = f"[{self.host}]" if ":" in self.host and not self.host.startswith("[") else self.host
-        return f"{self.scheme}://{host}:{self.port}"
+        return f"{self.scheme}://{bracket_ipv6_host(self.host)}:{self.port}"
+
+
+def bracket_ipv6_host(host: str) -> str:
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
 
 
 def is_port_available(host: str, port: int) -> bool:

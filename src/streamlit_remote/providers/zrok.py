@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from streamlit_remote.providers.executables import is_executable_available
+from streamlit_remote.server import bracket_ipv6_host
 
 ZROK_SHARE_HOST_RE = re.compile(r"(?<![\w.-])(?:https://)?([A-Za-z0-9-]+\.shares?\.zrok\.io)\b")
 
@@ -43,14 +44,14 @@ class ZrokProvider:
         if local_port is None:
             raise ValueError(f"Local URL must include a port for zrok: {local_url}")
 
-        local_host = "127.0.0.1" if parsed.hostname in {"0.0.0.0", "::"} else parsed.hostname
+        local_host = local_connect_host(parsed.hostname)
         if local_host is None:
             raise ValueError(f"Local URL must include a host for zrok: {local_url}")
 
         command = [str(self.executable), "share", "public", "--headless"]
         if not origin_tls_verify:
             command.append("--insecure")
-        command.append(f"{parsed.scheme}://{format_target_host(local_host)}:{local_port}")
+        command.append(f"{parsed.scheme}://{bracket_ipv6_host(local_host)}:{local_port}")
         return command
 
     def parse_public_url(self, line: str) -> str | None:
@@ -67,7 +68,9 @@ class ZrokProvider:
         return is_executable_available(self.executable)
 
 
-def format_target_host(host: str) -> str:
-    if ":" in host and not host.startswith("["):
-        return f"[{host}]"
+def local_connect_host(host: str | None) -> str | None:
+    if host == "0.0.0.0":
+        return "127.0.0.1"
+    if host == "::":
+        return "::1"
     return host
