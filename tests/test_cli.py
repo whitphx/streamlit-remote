@@ -120,6 +120,7 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
     monkeypatch.setattr(cli, "require_streamlit", lambda: pytest.fail("unexpected check"))
+    monkeypatch.setattr(cli, "first_available_provider", lambda: None)
 
     exit_code = cli.run_cli([str(app_path), "--dry-run"])
 
@@ -128,6 +129,28 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     assert "Streamlit command:" in captured.out
     assert "--client.toolbarMode developer" in captured.out
     assert "cloudflared tunnel --url http://localhost:8501" in captured.out
+
+
+def test_run_cli_dry_run_chooses_available_provider_without_provider_option(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    def get_fake_provider(name: str, executable: str | Path | None = None) -> FakeProvider:
+        if name == "cloudflare":
+            return FakeProvider(name=name, available=False)
+        return FakeProvider(name=name, available=name == "ngrok")
+
+    monkeypatch.setattr(cli, "get_provider", get_fake_provider)
+
+    exit_code = cli.run_cli([str(app_path), "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "ngrok tunnel http://localhost:8501" in captured.out
 
 
 def test_run_cli_dry_run_can_set_toolbar_mode(
@@ -405,23 +428,32 @@ def test_run_cli_rejects_remote_auth_with_cloudflare(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--remote-auth", "oauth"])
+    exit_code = cli.run_cli([str(app_path), "--provider", "cloudflare", "--remote-auth", "oauth"])
 
     assert exit_code == 2
     assert "supported only with `--provider ngrok`" in capsys.readouterr().err
 
 
-def test_run_cli_rejects_ngrok_binary_with_cloudflare(
+def test_run_cli_dry_run_infers_ngrok_provider_from_ngrok_binary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     app_path = tmp_path / "app.py"
+    ngrok_binary = tmp_path / "ngrok"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--ngrok-binary", str(tmp_path / "ngrok")])
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--ngrok-binary",
+            str(ngrok_binary),
+        ]
+    )
 
-    assert exit_code == 2
-    assert "`--ngrok-binary` can only be used with `--provider ngrok`" in (capsys.readouterr().err)
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"{ngrok_binary} http http://localhost:8501" in captured.out
 
 
 def test_run_cli_rejects_cloudflared_binary_with_ngrok(
@@ -592,10 +624,26 @@ def test_run_cli_reports_missing_cloudflared(
     monkeypatch.setattr(cli, "is_port_available", lambda host, port: True)
     monkeypatch.setattr(cli, "get_provider", lambda name: UnavailableProvider())
 
-    exit_code = cli.run_cli([str(app_path)])
+    exit_code = cli.run_cli([str(app_path), "--provider", "cloudflare"])
 
     assert exit_code == 2
     assert "cloudflared was not found on PATH" in capsys.readouterr().err
+
+
+def test_run_cli_reports_no_available_provider_without_provider_option(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "get_provider", lambda name: UnavailableProvider(name=name))
+
+    exit_code = cli.run_cli([str(app_path)])
+
+    assert exit_code == 2
+    assert "No supported tunnel provider was found on PATH" in capsys.readouterr().err
 
 
 def test_require_streamlit_reports_missing_dependency(
@@ -631,6 +679,33 @@ class UnavailableProvider:
 
     def is_available(self) -> bool:
         return False
+
+
+@dataclass
+class FakeProvider:
+    name: str
+    available: bool
+    log_prefix: str = "tunnel"
+    install_hint: str = "provider unavailable"
+
+    def build_command(
+        self,
+        local_url: str,
+        *,
+        origin_tls_verify: bool = True,
+        tunnel_log_level: str = "info",
+        traffic_policy_file: Path | None = None,
+    ) -> list[str]:
+        return [self.name, "tunnel", local_url]
+
+    def parse_public_url(self, line: str) -> str | None:
+        return None
+
+    def get_public_url(self) -> str | None:
+        return None
+
+    def is_available(self) -> bool:
+        return self.available
 
 
 def test_should_print_tunnel_line_filters_by_level() -> None:

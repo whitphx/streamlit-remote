@@ -27,7 +27,7 @@ from streamlit_remote.process import (
     start_logged_process,
     terminate_processes,
 )
-from streamlit_remote.providers import get_provider
+from streamlit_remote.providers import PROVIDER_NAMES, TunnelProvider, get_provider
 from streamlit_remote.providers.ngrok import (
     MANAGED_OAUTH_PROVIDERS,
     PreparedNgrokTrafficPolicy,
@@ -48,9 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="localhost", help="Local Streamlit host.")
     parser.add_argument(
         "--provider",
-        default="cloudflare",
-        choices=["cloudflare", "ngrok", "zrok"],
-        help="Remote tunnel provider.",
+        choices=PROVIDER_NAMES,
+        help="Remote tunnel provider. Defaults to the first available provider.",
     )
     parser.add_argument(
         "--tunnel-log-level",
@@ -230,26 +229,30 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
     if namespace.no_remote and namespace.remote_auth != "off":
         raise CliError("`--remote-auth` requires remote access. Remove `--no-remote`.")
 
+    if namespace.cloudflared_binary is not None and namespace.no_remote:
+        raise CliError("`--cloudflared-binary` requires remote access. Remove `--no-remote`.")
+
+    if namespace.ngrok_binary is not None and namespace.no_remote:
+        raise CliError("`--ngrok-binary` requires remote access. Remove `--no-remote`.")
+
+    if namespace.zrok_binary is not None and namespace.no_remote:
+        raise CliError("`--zrok-binary` requires remote access. Remove `--no-remote`.")
+
+    implied_provider = provider_implied_by_options(namespace)
+    if namespace.provider is None:
+        namespace.provider = implied_provider
+
     if namespace.remote_auth != "off" and namespace.provider != "ngrok":
         raise CliError("`--remote-auth` is currently supported only with `--provider ngrok`.")
 
-    if namespace.cloudflared_binary is not None:
-        if namespace.no_remote:
-            raise CliError("`--cloudflared-binary` requires remote access. Remove `--no-remote`.")
-        if namespace.provider != "cloudflare":
-            raise CliError("`--cloudflared-binary` can only be used with `--provider cloudflare`.")
+    if namespace.cloudflared_binary is not None and namespace.provider != "cloudflare":
+        raise CliError("`--cloudflared-binary` can only be used with `--provider cloudflare`.")
 
-    if namespace.ngrok_binary is not None:
-        if namespace.no_remote:
-            raise CliError("`--ngrok-binary` requires remote access. Remove `--no-remote`.")
-        if namespace.provider != "ngrok":
-            raise CliError("`--ngrok-binary` can only be used with `--provider ngrok`.")
+    if namespace.ngrok_binary is not None and namespace.provider != "ngrok":
+        raise CliError("`--ngrok-binary` can only be used with `--provider ngrok`.")
 
-    if namespace.zrok_binary is not None:
-        if namespace.no_remote:
-            raise CliError("`--zrok-binary` requires remote access. Remove `--no-remote`.")
-        if namespace.provider != "zrok":
-            raise CliError("`--zrok-binary` can only be used with `--provider zrok`.")
+    if namespace.zrok_binary is not None and namespace.provider != "zrok":
+        raise CliError("`--zrok-binary` can only be used with `--provider zrok`.")
 
     if namespace.mkcert_binary is not None and namespace.https_mode != "mkcert":
         raise CliError("`--mkcert-binary` can only be used with `--https mkcert`.")
@@ -276,6 +279,29 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
             raise CliError(
                 f"ngrok Traffic Policy path is not a file: {namespace.ngrok_traffic_policy_file}"
             )
+
+
+def provider_implied_by_options(namespace: argparse.Namespace) -> str | None:
+    implied: list[str] = []
+    if namespace.cloudflared_binary is not None:
+        implied.append("cloudflare")
+    if (
+        namespace.ngrok_binary is not None
+        or namespace.remote_auth != "off"
+        or namespace.ngrok_traffic_policy_file is not None
+    ):
+        implied.append("ngrok")
+    if namespace.zrok_binary is not None:
+        implied.append("zrok")
+
+    unique = set(implied)
+    if len(unique) > 1:
+        raise CliError(
+            "Provider-specific options conflict. Remove the conflicting options "
+            "or pass a matching `--provider`."
+        )
+
+    return implied[0] if implied else None
 
 
 def require_streamlit() -> None:
@@ -309,11 +335,10 @@ def run(namespace: argparse.Namespace) -> int:
     tunnel_command: list[str] | None = None
     traffic_policy: PreparedNgrokTrafficPolicy | None = None
     if not namespace.no_remote:
-        tunnel_binary = selected_tunnel_binary(namespace)
-        if tunnel_binary is None:
-            provider = get_provider(namespace.provider)
-        else:
-            provider = get_provider(namespace.provider, executable=tunnel_binary)
+        provider = resolve_cli_provider(
+            namespace,
+            allow_unavailable_default=namespace.dry_run,
+        )
         traffic_policy = prepare_cli_ngrok_traffic_policy(namespace, dry_run=True)
         tunnel_command = provider.build_command(
             local_server.url,
@@ -867,6 +892,9 @@ def prepare_cli_https_material(namespace: argparse.Namespace) -> HttpsMaterial |
 
 
 def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
+    if namespace.provider is None:
+        return None
+
     if namespace.provider == "cloudflare":
         return namespace.cloudflared_binary
 
@@ -875,6 +903,44 @@ def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
 
     if namespace.provider == "zrok":
         return namespace.zrok_binary
+
+    return None
+
+
+def resolve_cli_provider(
+    namespace: argparse.Namespace,
+    *,
+    allow_unavailable_default: bool,
+) -> TunnelProvider:
+    if namespace.provider is not None:
+        return get_cli_provider(namespace.provider, selected_tunnel_binary(namespace))
+
+    provider = first_available_provider()
+    if provider is not None:
+        namespace.provider = provider.name
+        return provider
+
+    if allow_unavailable_default:
+        namespace.provider = "cloudflare"
+        return get_provider(namespace.provider)
+
+    raise CliError(
+        "No supported tunnel provider was found on PATH. Install cloudflared, ngrok, "
+        "or zrok, or pass `--provider` with the matching binary option."
+    )
+
+
+def get_cli_provider(name: str, executable: Path | None) -> TunnelProvider:
+    if executable is None:
+        return get_provider(name)
+    return get_provider(name, executable=executable)
+
+
+def first_available_provider() -> TunnelProvider | None:
+    for provider_name in PROVIDER_NAMES:
+        provider = get_provider(provider_name)
+        if provider.is_available():
+            return provider
 
     return None
 

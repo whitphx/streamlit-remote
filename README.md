@@ -2,7 +2,7 @@
 
 `streamlit-remote` runs a Streamlit app locally, can serve it over local HTTPS, and can expose it through a temporary remote HTTPS URL.
 
-It supports Cloudflare Quick Tunnel, ngrok, and managed self-signed certificates for local HTTPS. It is meant for development, demos, and temporary sharing, similar in spirit to Slidev's remote access workflow.
+It supports Cloudflare Quick Tunnel, ngrok, zrok, and managed self-signed certificates for local HTTPS. It is meant for development, demos, and temporary sharing, similar in spirit to Slidev's remote access workflow.
 
 ## Installation
 
@@ -18,7 +18,7 @@ This package requires Python 3.10 or newer.
 st-remote app.py
 ```
 
-This starts Streamlit on `http://localhost:8501`, starts a Cloudflare Quick Tunnel to that local URL, prefixes logs from both child processes, prints the public `trycloudflare.com` URL once Cloudflare reports it, and opens that remote URL in your browser.
+This starts Streamlit on `http://localhost:8501`, starts the first available remote tunnel provider, prefixes logs from both child processes, prints the public HTTPS URL once the provider reports it, and opens that remote URL in your browser. The automatic provider order is Cloudflare Quick Tunnel, ngrok, then zrok. Pass `--provider` to choose one explicitly.
 
 You can also use the alias:
 
@@ -29,7 +29,7 @@ streamlit-remote app.py
 ## Options
 
 ```bash
-st-remote APP [--port 8501] [--host localhost] [--https off] [--provider cloudflare]
+st-remote APP [--port 8501] [--host localhost] [--https off] [--provider PROVIDER]
 ```
 
 Useful options:
