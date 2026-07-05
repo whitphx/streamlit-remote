@@ -217,6 +217,44 @@ def test_run_cli_dry_run_uses_custom_ngrok_binary(
     assert f"{ngrok_binary} http http://localhost:8501" in captured.out
 
 
+def test_run_cli_dry_run_prints_zrok_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "zrok"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "zrok share public --headless localhost:8501" in captured.out
+
+
+def test_run_cli_dry_run_uses_custom_zrok_binary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    zrok_binary = tmp_path / "bin" / "zrok"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "zrok",
+            "--zrok-binary",
+            str(zrok_binary),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert f"{zrok_binary} share public --headless localhost:8501" in captured.out
+
+
 def test_run_cli_dry_run_prints_ngrok_off_log_command(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -384,6 +422,27 @@ def test_run_cli_rejects_cloudflared_binary_with_ngrok(
     assert "`--cloudflared-binary` can only be used with `--provider cloudflare`" in (
         capsys.readouterr().err
     )
+
+
+def test_run_cli_rejects_zrok_binary_with_ngrok(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--zrok-binary",
+            str(tmp_path / "zrok"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "`--zrok-binary` can only be used with `--provider zrok`" in capsys.readouterr().err
 
 
 def test_run_cli_rejects_mkcert_binary_without_mkcert_https(

@@ -5,6 +5,7 @@ from typing import Literal, Protocol
 
 from streamlit_remote.providers.cloudflare import CloudflareQuickTunnelProvider
 from streamlit_remote.providers.ngrok import NgrokProvider
+from streamlit_remote.providers.zrok import ZrokProvider
 
 TunnelLogLevel = Literal["info", "warn", "error", "off"]
 
@@ -41,5 +42,8 @@ def get_provider(name: str, executable: str | Path | None = None) -> TunnelProvi
 
     if name == "ngrok":
         return NgrokProvider(executable=executable or "ngrok")
+
+    if name == "zrok":
+        return ZrokProvider(executable=executable or "zrok")
 
     raise ValueError(f"Unsupported provider: {name}")

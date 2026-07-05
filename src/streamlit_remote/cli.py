@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--provider",
         default="cloudflare",
-        choices=["cloudflare", "ngrok"],
+        choices=["cloudflare", "ngrok", "zrok"],
         help="Remote tunnel provider.",
     )
     parser.add_argument(
@@ -64,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--ngrok-binary",
         type=Path,
         help="Path to the ngrok executable.",
+    )
+    parser.add_argument(
+        "--zrok-binary",
+        type=Path,
+        help="Path to the zrok executable.",
     )
     parser.add_argument(
         "--https",
@@ -236,6 +241,12 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
             raise CliError("`--ngrok-binary` requires remote access. Remove `--no-remote`.")
         if namespace.provider != "ngrok":
             raise CliError("`--ngrok-binary` can only be used with `--provider ngrok`.")
+
+    if namespace.zrok_binary is not None:
+        if namespace.no_remote:
+            raise CliError("`--zrok-binary` requires remote access. Remove `--no-remote`.")
+        if namespace.provider != "zrok":
+            raise CliError("`--zrok-binary` can only be used with `--provider zrok`.")
 
     if namespace.mkcert_binary is not None and namespace.https_mode != "mkcert":
         raise CliError("`--mkcert-binary` can only be used with `--https mkcert`.")
@@ -751,6 +762,9 @@ def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
 
     if namespace.provider == "ngrok":
         return namespace.ngrok_binary
+
+    if namespace.provider == "zrok":
+        return namespace.zrok_binary
 
     return None
 
