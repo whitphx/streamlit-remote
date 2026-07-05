@@ -13,7 +13,7 @@ def test_build_zrok_command() -> None:
         "share",
         "public",
         "--headless",
-        "localhost:8501",
+        "http://localhost:8501",
     ]
 
 
@@ -25,7 +25,7 @@ def test_build_zrok_command_rewrites_any_address_host() -> None:
         "share",
         "public",
         "--headless",
-        "127.0.0.1:8501",
+        "http://127.0.0.1:8501",
     ]
 
 
@@ -37,7 +37,44 @@ def test_build_zrok_command_with_custom_binary() -> None:
         "share",
         "public",
         "--headless",
-        "127.0.0.1:8501",
+        "http://127.0.0.1:8501",
+    ]
+
+
+def test_build_zrok_command_for_https_upstream() -> None:
+    provider = ZrokProvider()
+
+    assert provider.build_command("https://127.0.0.1:8501") == [
+        "zrok",
+        "share",
+        "public",
+        "--headless",
+        "https://127.0.0.1:8501",
+    ]
+
+
+def test_build_zrok_command_for_self_signed_https_upstream() -> None:
+    provider = ZrokProvider()
+
+    assert provider.build_command("https://127.0.0.1:8501", origin_tls_verify=False) == [
+        "zrok",
+        "share",
+        "public",
+        "--headless",
+        "--insecure",
+        "https://127.0.0.1:8501",
+    ]
+
+
+def test_build_zrok_command_brackets_ipv6_host() -> None:
+    provider = ZrokProvider()
+
+    assert provider.build_command("http://[::1]:8501") == [
+        "zrok",
+        "share",
+        "public",
+        "--headless",
+        "http://[::1]:8501",
     ]
 
 
@@ -51,45 +88,36 @@ def test_build_zrok_command_requires_port() -> None:
 def test_parse_zrok_public_url() -> None:
     provider = ZrokProvider()
 
-    line = "access your zrok share at https://example-share.share.zrok.io"
+    line = "access your zrok share at https://example-share.shares.zrok.io"
 
-    assert provider.parse_public_url(line) == "https://example-share.share.zrok.io"
+    assert provider.parse_public_url(line) == "https://example-share.shares.zrok.io"
 
 
 def test_parse_zrok_public_url_strips_trailing_punctuation() -> None:
     provider = ZrokProvider()
 
-    line = "share ready (https://example-share.share.zrok.io)."
+    line = '"msg":"share ready https://example-share.shares.zrok.io"}'
 
-    assert provider.parse_public_url(line) == "https://example-share.share.zrok.io"
-
-
-def test_parse_zrok_public_url_with_ansi_styling() -> None:
-    provider = ZrokProvider()
-
-    line = "\x1b[32mhttps://example-share.share.zrok.io\x1b[0m"
-
-    assert provider.parse_public_url(line) == "https://example-share.share.zrok.io"
+    assert provider.parse_public_url(line) == "https://example-share.shares.zrok.io"
 
 
-def test_parse_zrok_public_url_with_terminal_hyperlink() -> None:
+def test_parse_zrok_public_url_ignores_unrelated_https_url() -> None:
     provider = ZrokProvider()
 
     line = (
-        "\x1b]8;;https://example-share.share.zrok.io\x1b\\"
-        "https://example-share.share.zrok.io"
-        "\x1b]8;;\x1b\\"
+        '{"msg":"see https://github.com/openziti/zrok/releases before using '
+        'yy6211g7d8pk.shares.zrok.io"}'
     )
 
-    assert provider.parse_public_url(line) == "https://example-share.share.zrok.io"
+    assert provider.parse_public_url(line) == "https://yy6211g7d8pk.shares.zrok.io"
 
 
-def test_parse_zrok_public_url_from_terminal_hyperlink_target() -> None:
+def test_parse_zrok_ignores_unrelated_https_url_without_share_host() -> None:
     provider = ZrokProvider()
 
-    line = "\x1b]8;;https://example-share.share.zrok.io\x1b\\open share\x1b]8;;\x1b\\"
+    line = '{"msg":"see https://github.com/openziti/zrok/releases"}'
 
-    assert provider.parse_public_url(line) == "https://example-share.share.zrok.io"
+    assert provider.parse_public_url(line) is None
 
 
 def test_parse_zrok_public_url_from_json_log_host() -> None:

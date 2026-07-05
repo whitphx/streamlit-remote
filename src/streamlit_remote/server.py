@@ -13,7 +13,8 @@ class LocalServerConfig:
 
     @property
     def url(self) -> str:
-        return f"{self.scheme}://{self.host}:{self.port}"
+        host = f"[{self.host}]" if ":" in self.host and not self.host.startswith("[") else self.host
+        return f"{self.scheme}://{host}:{self.port}"
 
 
 def is_port_available(host: str, port: int) -> bool:

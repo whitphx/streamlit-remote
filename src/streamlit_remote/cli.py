@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import shlex
 import sys
 import threading
@@ -807,6 +808,20 @@ def should_print_tunnel_line(line: str, tunnel_log_level: str) -> bool:
 
 
 def classify_tunnel_line(line: str) -> str:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        payload = None
+
+    if isinstance(payload, dict):
+        level = payload.get("level")
+        if isinstance(level, str):
+            normalized_level = level.lower()
+            if normalized_level in {"error", "fatal", "panic"}:
+                return "error"
+            if normalized_level in {"warn", "warning"}:
+                return "warn"
+
     lowered = line.lower()
     if any(marker in lowered for marker in ("lvl=error", "lvl=crit", " err ", " error", "fatal")):
         return "error"

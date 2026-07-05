@@ -193,7 +193,7 @@ Then run:
 st-remote app.py --provider zrok
 ```
 
-`streamlit-remote` starts zrok with `zrok share public --headless localhost:8501` and opens the HTTPS public share URL after zrok prints it. The `--headless` flag disables zrok's own terminal UI so it does not conflict with `st-remote`'s runtime display.
+`streamlit-remote` starts zrok with a command such as `zrok share public --headless http://localhost:8501` and opens the HTTPS public share URL after zrok prints it. The `--headless` flag disables zrok's own terminal UI so it does not conflict with `st-remote`'s runtime display.
 
 ## Tunnel Logs
 
