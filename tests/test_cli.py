@@ -489,9 +489,7 @@ def test_run_cli_rejects_ngrok_binary_with_cloudflare(
     )
 
     assert exit_code == 2
-    assert "`--ngrok-binary` can only be used with `--provider ngrok`" in (
-        capsys.readouterr().err
-    )
+    assert "`--ngrok-binary` can only be used with `--provider ngrok`" in (capsys.readouterr().err)
 
 
 def test_run_cli_rejects_cloudflared_binary_with_ngrok(
