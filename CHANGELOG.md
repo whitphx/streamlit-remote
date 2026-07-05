@@ -2,6 +2,18 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.9.0'></a>
+## 0.9.0 — 2026-07-05
+
+### Added
+
+- Add TUI shortcuts for scrolling the log panel up and down.
+
+### Fixed
+
+- Keep TUI shortcuts active after unrecognized terminal escape sequences.
+- Keep TUI log scrolling anchored correctly when visible log lines repeat.
+
 <a id='changelog-0.8.0'></a>
 ## 0.8.0 — 2026-07-05
 
