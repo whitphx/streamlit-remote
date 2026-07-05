@@ -135,6 +135,8 @@ class RichRuntimeDisplay(RuntimeDisplay):
         self._remote_url: str | None = None
         self._shortcuts_visible = False
         self._log_window_start: int | None = None
+        self._log_ids: deque[int] = deque(maxlen=max_log_lines)
+        self._next_log_id = 0
         self._live: Live | None = None
         self._lock = threading.Lock()
 
@@ -222,8 +224,10 @@ class RichRuntimeDisplay(RuntimeDisplay):
         with self._lock:
             anchor = self._log_window_anchor()
             self._logs.append((source, line))
+            self._log_ids.append(self._next_log_id)
+            self._next_log_id += 1
             if anchor is not None:
-                self._log_window_start = self._find_log_window_anchor(anchor)
+                self._log_window_start = self._find_log_window_anchor(anchor) or 0
             self._refresh()
 
     def set_state(
@@ -242,6 +246,9 @@ class RichRuntimeDisplay(RuntimeDisplay):
             self._shortcuts_visible = shortcuts_visible
             self._logs.clear()
             self._logs.extend(logs)
+            self._log_ids.clear()
+            self._log_ids.extend(range(len(logs)))
+            self._next_log_id = len(logs)
             self._log_window_start = None
             self._refresh()
 
@@ -333,7 +340,6 @@ class RichRuntimeDisplay(RuntimeDisplay):
                 log_count=len(logs),
                 available_rows=available_rows,
             )
-            self._log_window_start = start
             return logs[start : start + available_rows]
 
         traceback_spans = self._streamlit_traceback_spans(logs)
@@ -362,21 +368,8 @@ class RichRuntimeDisplay(RuntimeDisplay):
         self,
         logs: list[tuple[str, str]],
     ) -> list[tuple[str, str]]:
-        arranged_logs: list[tuple[str, str]] = []
-        deferred_logs: list[tuple[str, str]] = []
-        in_streamlit_traceback = False
-
-        for source, line in logs:
-            if self._is_streamlit_traceback_marker(source, line):
-                in_streamlit_traceback = True
-                arranged_logs.append((source, line))
-            elif in_streamlit_traceback and source != STREAMLIT_SOURCE:
-                deferred_logs.append((source, line))
-            else:
-                arranged_logs.append((source, line))
-
-        arranged_logs.extend(deferred_logs)
-        return arranged_logs
+        entries = [(index, log) for index, log in enumerate(logs)]
+        return [log for _, log in self._move_interleaved_log_entries_after_tracebacks(entries)]
 
     def _scroll_log(self, rows: int) -> bool:
         logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
@@ -409,14 +402,36 @@ class RichRuntimeDisplay(RuntimeDisplay):
                 available_rows=available_rows,
             )
 
-        visible_logs = self._select_visible_logs(logs, available_rows=available_rows)
-        if not visible_logs:
+        return self._default_log_window_start(logs, available_rows=available_rows)
+
+    def _default_log_window_start(
+        self,
+        logs: list[tuple[str, str]],
+        *,
+        available_rows: int,
+    ) -> int:
+        if len(logs) <= available_rows:
             return 0
-        first_visible_log = visible_logs[0]
-        for index, log in enumerate(logs):
-            if log == first_visible_log:
-                return index
-        return max(0, len(logs) - available_rows)
+
+        traceback_spans = self._streamlit_traceback_spans(logs)
+        traceback_span = traceback_spans[-1] if traceback_spans else None
+        if traceback_span is None:
+            return len(logs) - available_rows
+
+        start, end = traceback_span
+        if any(source == STREAMLIT_SOURCE for source, _ in logs[end:]):
+            return len(logs) - available_rows
+
+        traceback_rows = end - start
+        if traceback_rows >= available_rows:
+            return end - available_rows
+
+        following_rows = available_rows - traceback_rows
+        following_count = min(following_rows, len(logs) - end)
+        preceding_rows = available_rows - traceback_rows - following_count
+        if preceding_rows:
+            return max(0, start - preceding_rows)
+        return start
 
     def _clamped_log_window_start(
         self,
@@ -428,33 +443,50 @@ class RichRuntimeDisplay(RuntimeDisplay):
         max_start = max(0, log_count - available_rows)
         return min(max(0, start), max_start)
 
-    def _log_window_anchor(self) -> tuple[tuple[str, str], int] | None:
+    def _log_window_anchor(self) -> int | None:
         if self._log_window_start is None:
             return None
 
-        logs = self._move_interleaved_logs_after_tracebacks(list(self._logs))
-        if not logs:
+        entries = self._arranged_log_entries()
+        if not entries:
             return None
         start = self._clamped_log_window_start(
             self._log_window_start,
-            log_count=len(logs),
+            log_count=len(entries),
             available_rows=max(1, self._layout_heights()[1] - self._PANEL_FRAME_ROWS),
         )
-        log = logs[start]
-        occurrence = sum(1 for candidate in logs[: start + 1] if candidate == log)
-        return log, occurrence
+        return entries[start][0]
 
-    def _find_log_window_anchor(self, anchor: tuple[tuple[str, str], int]) -> int | None:
-        log, occurrence = anchor
-        seen = 0
-        for index, candidate in enumerate(
-            self._move_interleaved_logs_after_tracebacks(list(self._logs))
-        ):
-            if candidate == log:
-                seen += 1
-                if seen == occurrence:
-                    return index
-        return self._log_window_start
+    def _find_log_window_anchor(self, anchor: int) -> int | None:
+        for index, (log_id, _) in enumerate(self._arranged_log_entries()):
+            if log_id == anchor:
+                return index
+        return None
+
+    def _arranged_log_entries(self) -> list[tuple[int, tuple[str, str]]]:
+        return self._move_interleaved_log_entries_after_tracebacks(
+            list(zip(self._log_ids, self._logs, strict=True))
+        )
+
+    def _move_interleaved_log_entries_after_tracebacks(
+        self,
+        entries: list[tuple[int, tuple[str, str]]],
+    ) -> list[tuple[int, tuple[str, str]]]:
+        arranged_entries: list[tuple[int, tuple[str, str]]] = []
+        deferred_entries: list[tuple[int, tuple[str, str]]] = []
+        in_streamlit_traceback = False
+
+        for log_id, (source, line) in entries:
+            if self._is_streamlit_traceback_marker(source, line):
+                in_streamlit_traceback = True
+                arranged_entries.append((log_id, (source, line)))
+            elif in_streamlit_traceback and source != STREAMLIT_SOURCE:
+                deferred_entries.append((log_id, (source, line)))
+            else:
+                arranged_entries.append((log_id, (source, line)))
+
+        arranged_entries.extend(deferred_entries)
+        return arranged_entries
 
     def _raw_streamlit_traceback_indexes(self, logs: list[tuple[str, str]]) -> set[int]:
         raw_indexes: set[int] = set()

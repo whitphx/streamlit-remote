@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import select
 import shlex
 import sys
 import threading
@@ -12,7 +13,7 @@ import webbrowser
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 from streamlit_remote.https import (
     HttpsError,
@@ -637,6 +638,8 @@ def listen_for_cbreak_shortcuts(
             shortcut = read_cbreak_shortcut(stdin, fd=fd)
             if shortcut == "":
                 return True
+            if shortcut is None:
+                continue
             dispatch_shortcut(
                 shortcut,
                 restart_requested,
@@ -726,7 +729,7 @@ def dispatch_shortcut(
         reset_log_scroll()
 
 
-def read_cbreak_shortcut(stdin: TextIO, *, fd: int | None = None) -> str:
+def read_cbreak_shortcut(stdin: TextIO, *, fd: int | None = None) -> str | None:
     first_byte = read_cbreak_byte(stdin, fd=fd)
     if first_byte == b"":
         return ""
@@ -734,39 +737,31 @@ def read_cbreak_shortcut(stdin: TextIO, *, fd: int | None = None) -> str:
     if first_byte != b"\x1b":
         return first_byte.decode("utf-8", errors="replace")
 
-    select_module: Any | None
-    try:
-        import select
-    except ImportError:
-        select_module = None
-    else:
-        select_module = select
-
     sequence = [first_byte]
-    introducer = read_cbreak_byte(stdin, fd=fd, timeout=0.5, select_module=select_module)
+    introducer = read_cbreak_byte(stdin, fd=fd, timeout=0.5)
     if introducer == b"":
         return "\x1b"
     sequence.append(introducer)
 
     if introducer == b"O":
-        final = read_cbreak_byte(stdin, fd=fd, timeout=0.5, select_module=select_module)
+        final = read_cbreak_byte(stdin, fd=fd, timeout=0.5)
         if final in {b"A", b"B"}:
             sequence.append(final)
             return b"".join(sequence).decode("ascii")
-        return ""
+        return None
 
     if introducer != b"[":
-        return ""
+        return None
 
     while len(sequence) < 6:
-        next_byte = read_cbreak_byte(stdin, fd=fd, timeout=0.5, select_module=select_module)
+        next_byte = read_cbreak_byte(stdin, fd=fd, timeout=0.5)
         if next_byte == b"":
-            return ""
+            return None
         sequence.append(next_byte)
         if 0x40 <= next_byte[0] <= 0x7E:
             return b"".join(sequence).decode("ascii", errors="ignore")
 
-    return ""
+    return None
 
 
 def read_cbreak_byte(
@@ -774,13 +769,12 @@ def read_cbreak_byte(
     *,
     fd: int | None,
     timeout: float | None = None,
-    select_module: Any | None = None,
 ) -> bytes:
     if fd is not None:
-        if timeout is not None and select_module is not None:
+        if timeout is not None:
             try:
-                readable, _, _ = select_module.select([fd], [], [], timeout)
-            except (AttributeError, OSError):
+                readable, _, _ = select.select([fd], [], [], timeout)
+            except OSError:
                 return b""
             if not readable:
                 return b""

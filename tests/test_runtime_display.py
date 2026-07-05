@@ -151,6 +151,54 @@ def test_rich_runtime_display_scrolls_log_window() -> None:
     assert "line-11" in rendered
 
 
+def test_rich_runtime_display_scrolls_from_tail_with_duplicate_top_line() -> None:
+    console = Console(file=StringIO(), width=80, height=13, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=100)
+    logs = [("streamlit", f"line-{index}") for index in range(20)]
+    logs[5] = ("streamlit", "DUP")
+    logs[16] = ("streamlit", "DUP")
+
+    display.set_state(
+        local_url=None,
+        remote_url=None,
+        statuses={},
+        shortcuts_visible=False,
+        logs=logs,
+    )
+
+    assert [line for _, line in display._visible_logs()] == [
+        "DUP",
+        "line-17",
+        "line-18",
+        "line-19",
+    ]
+    assert display.scroll_log_up()
+    assert [line for _, line in display._visible_logs()] == [
+        "line-15",
+        "DUP",
+        "line-17",
+        "line-18",
+    ]
+
+
+def test_rich_runtime_display_visible_logs_does_not_clamp_scroll_state() -> None:
+    console = Console(file=StringIO(), width=80, height=13, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=100)
+
+    for index in range(12):
+        display.log("streamlit", f"line-{index}")
+
+    display._log_window_start = 999
+
+    assert [line for _, line in display._visible_logs()] == [
+        "line-8",
+        "line-9",
+        "line-10",
+        "line-11",
+    ]
+    assert display._log_window_start == 999
+
+
 def test_rich_runtime_display_preserves_scrolled_log_window_after_new_logs() -> None:
     output = StringIO()
     console = Console(file=output, width=80, height=13, force_terminal=True)
@@ -166,6 +214,44 @@ def test_rich_runtime_display_preserves_scrolled_log_window_after_new_logs() -> 
 
     assert "line-7" in rendered
     assert "line-12" not in rendered
+
+
+def test_rich_runtime_display_preserves_duplicate_anchor_after_deque_eviction() -> None:
+    console = Console(file=StringIO(), width=80, height=13, force_terminal=True)
+    display = RichRuntimeDisplay(console=console, max_log_lines=6)
+    logs = [
+        ("streamlit", "DUP"),
+        ("streamlit", "DUP"),
+        ("streamlit", "line-2"),
+        ("streamlit", "line-3"),
+        ("streamlit", "line-4"),
+        ("streamlit", "line-5"),
+    ]
+
+    display.set_state(
+        local_url=None,
+        remote_url=None,
+        statuses={},
+        shortcuts_visible=False,
+        logs=logs,
+    )
+
+    assert display.scroll_log_up()
+    assert [line for _, line in display._visible_logs()] == [
+        "DUP",
+        "line-2",
+        "line-3",
+        "line-4",
+    ]
+
+    display.log("streamlit", "line-6")
+
+    assert [line for _, line in display._visible_logs()] == [
+        "DUP",
+        "line-2",
+        "line-3",
+        "line-4",
+    ]
 
 
 def test_rich_runtime_display_scrolls_from_traceback_pinned_window() -> None:
