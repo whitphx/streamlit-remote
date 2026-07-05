@@ -2,6 +2,13 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.8.0'></a>
+## 0.8.0 — 2026-07-05
+
+### Added
+
+- Added zrok as a remote tunnel provider via `--provider zrok`, with `--zrok-binary` for custom executable paths.
+
 <a id='changelog-0.7.2'></a>
 ## 0.7.2 — 2026-07-03
 
