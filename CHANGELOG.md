@@ -2,6 +2,19 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.10.0'></a>
+## 0.10.0 — 2026-07-06
+
+### Added
+
+- Added a Streamlit provider smoke-test example and documented the manual provider compatibility checklist.
+
+- Added Pinggy as a remote tunnel provider via `--provider pinggy`, using OpenSSH reverse tunneling.
+
+### Changed
+
+- Choose the first installed tunnel provider automatically when `--provider` is omitted.
+
 <a id='changelog-0.9.0'></a>
 ## 0.9.0 — 2026-07-05
 
