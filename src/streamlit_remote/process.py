@@ -3,14 +3,16 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from os import environ
+from typing import IO
 
 LineHandler = Callable[[str], None]
 LinePredicate = Callable[[str], bool]
 LogWriter = Callable[[str, str], None]
+LineTransformer = Callable[[str], str]
 
 
 @dataclass
@@ -26,6 +28,7 @@ def start_logged_process(
     on_line: LineHandler | None = None,
     should_print_line: LinePredicate | None = None,
     write_log: LogWriter | None = None,
+    transform_line: LineTransformer | None = None,
     env: Mapping[str, str] | None = None,
 ) -> ManagedProcess:
     process_env = None
@@ -48,8 +51,9 @@ def start_logged_process(
         if process.stdout is None:
             return
 
-        for raw_line in process.stdout:
-            line = raw_line.rstrip("\r\n")
+        for line in _iter_output_lines(process.stdout):
+            if transform_line is not None:
+                line = transform_line(line)
             if should_print_line is None or should_print_line(line):
                 if write_log is None:
                     print(f"[{prefix}] {line}", flush=True)
@@ -65,6 +69,36 @@ def start_logged_process(
     )
     output_thread.start()
     return ManagedProcess(process=process, prefix=prefix, output_thread=output_thread)
+
+
+def _iter_output_lines(output: IO[str]) -> Iterator[str]:
+    buffer: list[str] = []
+    previous_was_carriage_return = False
+
+    while True:
+        char = output.read(1)
+        if char == "":
+            break
+
+        if char == "\n":
+            if previous_was_carriage_return:
+                previous_was_carriage_return = False
+                continue
+            yield "".join(buffer)
+            buffer.clear()
+            continue
+
+        if char == "\r":
+            yield "".join(buffer)
+            buffer.clear()
+            previous_was_carriage_return = True
+            continue
+
+        previous_was_carriage_return = False
+        buffer.append(char)
+
+    if buffer:
+        yield "".join(buffer)
 
 
 def wait_for_process_exit(
