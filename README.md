@@ -2,7 +2,7 @@
 
 `streamlit-remote` runs a Streamlit app locally, can serve it over local HTTPS, and can expose it through a temporary remote HTTPS URL.
 
-It supports Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, and managed self-signed certificates for local HTTPS. It is meant for development, demos, and temporary sharing, similar in spirit to Slidev's remote access workflow.
+It supports Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, localhost.run, and managed self-signed certificates for local HTTPS. It is meant for development, demos, and temporary sharing, similar in spirit to Slidev's remote access workflow.
 
 ## Installation
 
@@ -18,7 +18,7 @@ This package requires Python 3.10 or newer.
 st-remote app.py
 ```
 
-This starts Streamlit on `http://localhost:8501`, starts the first available remote tunnel provider, prefixes logs from both child processes, prints the public HTTPS URL once the provider reports it, and opens that remote URL in your browser. The automatic provider order is Cloudflare Quick Tunnel, ngrok, zrok, then Pinggy. Pass `--provider` to choose one explicitly.
+This starts Streamlit on `http://localhost:8501`, starts the first available remote tunnel provider, prefixes logs from both child processes, prints the public HTTPS URL once the provider reports it, and opens that remote URL in your browser. The automatic provider order is Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, then localhost.run. Pass `--provider` to choose one explicitly.
 
 You can also use the alias:
 
@@ -47,10 +47,12 @@ st-remote app.py --https mkcert --mkcert-binary /path/to/mkcert --no-remote
 st-remote app.py --provider ngrok
 st-remote app.py --provider zrok
 st-remote app.py --provider pinggy
+st-remote app.py --provider localhost-run
 st-remote app.py --cloudflared-binary /path/to/cloudflared
 st-remote app.py --provider ngrok --ngrok-binary /path/to/ngrok
 st-remote app.py --provider zrok --zrok-binary /path/to/zrok
 st-remote app.py --provider pinggy --pinggy-binary /path/to/ssh
+st-remote app.py --provider localhost-run --localhost-run-binary /path/to/ssh
 st-remote app.py --provider ngrok --tunnel-log-level warn
 st-remote app.py --provider ngrok --remote-auth oauth --oauth-provider google
 st-remote app.py --provider ngrok --ngrok-traffic-policy-file policy.yml
@@ -68,7 +70,7 @@ Extra arguments after `--` are passed to `python -m streamlit run`.
 
 In an interactive terminal, `st-remote` shows a live terminal display with local and remote URLs, process statuses, recent logs, and shortcut help. Use `--no-tui` to keep plain prefixed log output from startup.
 
-Press `r` to restart only the Streamlit server while keeping the remote tunnel process running. This keeps the current tunnel session alive, so providers such as Cloudflare Quick Tunnel, ngrok, zrok, and Pinggy can continue serving the same public URL while Streamlit restarts behind it.
+Press `r` to restart only the Streamlit server while keeping the remote tunnel process running. This keeps the current tunnel session alive, so providers such as Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, and localhost.run can continue serving the same public URL while Streamlit restarts behind it.
 
 Press `t` to toggle between the live terminal display and plain prefixed log output. When switching to plain output, `st-remote` replays recent logs into the normal terminal buffer so you can copy older logs from terminal or tmux history. You can also press `p` to force plain output and `f` to force the live terminal display. In terminals where single-key input is unavailable, the Enter-based commands still work.
 
@@ -213,6 +215,22 @@ st-remote app.py --provider pinggy
 
 `streamlit-remote` starts Pinggy with `ssh -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR -p 443 -R0:localhost:8501 free.pinggy.io` and opens the HTTPS public URL after Pinggy prints it.
 
+### localhost.run
+
+localhost.run uses OpenSSH reverse tunneling. It requires the `ssh` command to be installed and available on `PATH`. If `ssh` is installed somewhere else, pass `--localhost-run-binary /path/to/ssh`.
+
+localhost.run's HTTP tunnel instructions are available from localhost.run:
+
+https://localhost.run/docs/
+
+Then run:
+
+```bash
+st-remote app.py --provider localhost-run
+```
+
+`streamlit-remote` starts localhost.run with `ssh -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR -o StrictHostKeyChecking=accept-new -R 80:localhost:8501 localhost.run` and opens the HTTPS public URL after localhost.run prints it.
+
 ## Tunnel Logs
 
 Tunnel provider logs are shown by default:
@@ -256,6 +274,9 @@ Common combinations:
 --https off + --provider pinggy
   Public HTTPS via Pinggy, local HTTP Streamlit.
 
+--https off + --provider localhost-run
+  Public HTTPS via localhost.run, local HTTP Streamlit.
+
 --https self-signed + --no-remote
   Local HTTPS Streamlit only.
 
@@ -272,7 +293,7 @@ For managed self-signed HTTPS with Cloudflare Tunnel, `streamlit-remote` also pa
 
 This exposes a local Streamlit app to the internet.
 
-Do not use it for sensitive data unless you have proper authentication and access control in place. Cloudflare Quick Tunnel, ngrok, zrok, and Pinggy are best suited for development, demos, and temporary sharing.
+Do not use it for sensitive data unless you have proper authentication and access control in place. Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, and localhost.run are best suited for development, demos, and temporary sharing.
 
 ngrok remote auth can add provider-level access control before requests reach Streamlit. Cloudflare Quick Tunnel auth is not supported by this package; Cloudflare Access requires a configured Zero Trust application and is outside the current Quick Tunnel workflow.
 
@@ -306,6 +327,7 @@ uv run st-remote examples/provider_smoke.py --provider cloudflare
 uv run st-remote examples/provider_smoke.py --provider ngrok
 uv run st-remote examples/provider_smoke.py --provider zrok
 uv run st-remote examples/provider_smoke.py --provider pinggy
+uv run st-remote examples/provider_smoke.py --provider localhost-run
 ```
 
 The provider passes the basic smoke test when the remote HTTPS URL opens, widget interactions update immediately, button clicks preserve session state, rerun refreshes the timestamp, and no persistent Streamlit reconnect/disconnect banner appears.

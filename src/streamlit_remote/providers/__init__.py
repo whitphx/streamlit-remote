@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from streamlit_remote.providers.cloudflare import CloudflareQuickTunnelProvider
+from streamlit_remote.providers.localhost_run import LocalhostRunProvider
 from streamlit_remote.providers.ngrok import NgrokProvider
 from streamlit_remote.providers.pinggy import PinggyProvider
 from streamlit_remote.providers.zrok import ZrokProvider
 
 TunnelLogLevel = Literal["info", "warn", "error", "off"]
-PROVIDER_NAMES = ("cloudflare", "ngrok", "zrok", "pinggy")
+PROVIDER_NAMES = ("cloudflare", "ngrok", "zrok", "pinggy", "localhost-run")
 
 
 class TunnelProvider(Protocol):
@@ -52,5 +53,8 @@ def get_provider(name: str, executable: str | Path | None = None) -> TunnelProvi
 
     if name == "pinggy":
         return PinggyProvider(executable=executable or "ssh")
+
+    if name == "localhost-run":
+        return LocalhostRunProvider(executable=executable or "ssh")
 
     raise ValueError(f"Unsupported provider: {name}")
