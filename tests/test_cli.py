@@ -271,6 +271,23 @@ def test_run_cli_dry_run_prints_pinggy_command(
     ) in captured.out
 
 
+def test_run_cli_dry_run_prints_localhost_run_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "localhost-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert (
+        "ssh -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR "
+        "-o StrictHostKeyChecking=accept-new -R 80:localhost:8501 localhost.run"
+    ) in captured.out
+
+
 def test_run_cli_dry_run_uses_custom_zrok_binary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -319,6 +336,33 @@ def test_run_cli_dry_run_uses_custom_pinggy_binary(
     assert (
         f"{pinggy_binary} -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR "
         "-p 443 -R0:localhost:8501 free.pinggy.io"
+    ) in captured.out
+
+
+def test_run_cli_dry_run_uses_custom_localhost_run_binary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    localhost_run_binary = tmp_path / "bin" / "ssh"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "localhost-run",
+            "--localhost-run-binary",
+            str(localhost_run_binary),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert (
+        f"{localhost_run_binary} -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR "
+        "-o StrictHostKeyChecking=accept-new -R 80:localhost:8501 localhost.run"
     ) in captured.out
 
 
@@ -600,6 +644,30 @@ def test_run_cli_rejects_pinggy_binary_with_ngrok(
     assert exit_code == 2
     assert "`--pinggy-binary` can only be used with `--provider pinggy`" in (
         capsys.readouterr().err
+    )
+
+
+def test_run_cli_rejects_localhost_run_binary_with_ngrok(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--localhost-run-binary",
+            str(tmp_path / "ssh"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert (
+        "`--localhost-run-binary` can only be used with `--provider localhost-run`"
+        in capsys.readouterr().err
     )
 
 

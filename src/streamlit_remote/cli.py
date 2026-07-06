@@ -78,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the ssh executable used by Pinggy.",
     )
     parser.add_argument(
+        "--localhost-run-binary",
+        type=Path,
+        help="Path to the ssh executable used by localhost.run.",
+    )
+    parser.add_argument(
         "--https",
         dest="https_mode",
         default="off",
@@ -246,6 +251,9 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
     if namespace.pinggy_binary is not None and namespace.no_remote:
         raise CliError("`--pinggy-binary` requires remote access. Remove `--no-remote`.")
 
+    if namespace.localhost_run_binary is not None and namespace.no_remote:
+        raise CliError("`--localhost-run-binary` requires remote access. Remove `--no-remote`.")
+
     if namespace.provider is None:
         namespace.provider = provider_implied_by_options(namespace)
 
@@ -263,6 +271,9 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
 
     if namespace.pinggy_binary is not None and namespace.provider != "pinggy":
         raise CliError("`--pinggy-binary` can only be used with `--provider pinggy`.")
+
+    if namespace.localhost_run_binary is not None and namespace.provider != "localhost-run":
+        raise CliError("`--localhost-run-binary` can only be used with `--provider localhost-run`.")
 
     if namespace.mkcert_binary is not None and namespace.https_mode != "mkcert":
         raise CliError("`--mkcert-binary` can only be used with `--https mkcert`.")
@@ -305,6 +316,8 @@ def provider_implied_by_options(namespace: argparse.Namespace) -> str | None:
         implied.append("zrok")
     if namespace.pinggy_binary is not None:
         implied.append("pinggy")
+    if namespace.localhost_run_binary is not None:
+        implied.append("localhost-run")
 
     if len(implied) > 1:
         raise CliError(
@@ -513,9 +526,13 @@ def run(namespace: argparse.Namespace) -> int:
                 tunnel_command,
                 provider.log_prefix,
                 on_line=on_tunnel_line,
-                should_print_line=lambda line: should_print_tunnel_line(
-                    line,
-                    namespace.tunnel_log_level,
+                should_print_line=lambda line: (
+                    should_print_tunnel_line(
+                        line,
+                        namespace.tunnel_log_level,
+                    )
+                    if line
+                    else False
                 ),
                 write_log=display.log,
                 transform_line=provider.normalize_log_line,
@@ -916,6 +933,9 @@ def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
 
     if namespace.provider == "pinggy":
         return namespace.pinggy_binary
+
+    if namespace.provider == "localhost-run":
+        return namespace.localhost_run_binary
 
     return None
 

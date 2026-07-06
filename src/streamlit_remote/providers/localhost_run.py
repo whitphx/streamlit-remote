@@ -10,24 +10,21 @@ from streamlit_remote.providers.terminal import normalize_terminal_line
 from streamlit_remote.providers.zrok import local_connect_host
 from streamlit_remote.server import bracket_ipv6_host
 
-PINGGY_HOST = "free.pinggy.io"
-PINGGY_PORT = 443
-PINGGY_URL_RE = re.compile(
-    r"https://[A-Za-z0-9.-]+\.(?:free\.pinggy\.(?:link|net)|run\.pinggy-free\.link)\b"
-)
+LOCALHOST_RUN_HOST = "localhost.run"
+LOCALHOST_RUN_URL_RE = re.compile(r"https://[A-Za-z0-9-]+\.lhr\.life\b")
 
 
 @dataclass(frozen=True)
-class PinggyProvider:
-    name: str = "pinggy"
-    log_prefix: str = "pinggy"
+class LocalhostRunProvider:
+    name: str = "localhost-run"
+    log_prefix: str = "localhost.run"
     executable: str | Path = "ssh"
 
     @property
     def install_hint(self) -> str:
         executable = str(self.executable)
         if executable == "ssh":
-            return "ssh was not found on PATH. Install OpenSSH or pass `--pinggy-binary`."
+            return "ssh was not found on PATH. Install OpenSSH or pass `--localhost-run-binary`."
         return f"ssh was not found at configured path: {executable}"
 
     def build_command(
@@ -43,15 +40,15 @@ class PinggyProvider:
             local_port = parsed.port
         except ValueError as exc:
             raise ValueError(
-                f"Local URL must include a valid port for Pinggy: {local_url}"
+                f"Local URL must include a valid port for localhost.run: {local_url}"
             ) from exc
 
         if local_port is None:
-            raise ValueError(f"Local URL must include a port for Pinggy: {local_url}")
+            raise ValueError(f"Local URL must include a port for localhost.run: {local_url}")
 
         local_host = local_connect_host(parsed.hostname)
         if local_host is None:
-            raise ValueError(f"Local URL must include a host for Pinggy: {local_url}")
+            raise ValueError(f"Local URL must include a host for localhost.run: {local_url}")
 
         return [
             str(self.executable),
@@ -60,15 +57,16 @@ class PinggyProvider:
             "ExitOnForwardFailure=yes",
             "-o",
             "LogLevel=ERROR",
-            "-p",
-            str(PINGGY_PORT),
-            f"-R0:{bracket_ipv6_host(local_host)}:{local_port}",
-            PINGGY_HOST,
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-R",
+            f"80:{bracket_ipv6_host(local_host)}:{local_port}",
+            LOCALHOST_RUN_HOST,
         ]
 
     def parse_public_url(self, line: str) -> str | None:
         line = self.normalize_log_line(line)
-        match = PINGGY_URL_RE.search(line)
+        match = LOCALHOST_RUN_URL_RE.search(line)
         if match is None:
             return None
         return match.group(0)
