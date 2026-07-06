@@ -71,6 +71,9 @@ class NgrokProvider:
                 return candidate.rstrip(",")
         return None
 
+    def normalize_log_line(self, line: str) -> str:
+        return line
+
     def get_public_url(self) -> str | None:
         try:
             with urlopen(AGENT_API_TUNNELS_URL, timeout=0.5) as response:

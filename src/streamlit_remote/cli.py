@@ -518,7 +518,8 @@ def run(namespace: argparse.Namespace) -> int:
                     namespace.tunnel_log_level,
                 ),
                 write_log=display.log,
-                transform_line=lambda line: normalize_provider_log_line(provider, line),
+                transform_line=provider.normalize_log_line,
+                split_on_carriage_return=provider.name == "pinggy",
             )
             display.set_status(provider.log_prefix, "running")
             public_url_poll_thread = threading.Thread(
@@ -986,17 +987,6 @@ def should_print_tunnel_line(line: str, tunnel_log_level: str) -> bool:
         return severity == "error"
 
     return True
-
-
-def normalize_provider_log_line(provider: TunnelProvider, line: str) -> str:
-    normalize_log_line = getattr(provider, "normalize_log_line", None)
-    if not callable(normalize_log_line):
-        return line
-
-    normalized = normalize_log_line(line)
-    if isinstance(normalized, str):
-        return normalized
-    return line
 
 
 def classify_tunnel_line(line: str) -> str:

@@ -29,6 +29,7 @@ def start_logged_process(
     should_print_line: LinePredicate | None = None,
     write_log: LogWriter | None = None,
     transform_line: LineTransformer | None = None,
+    split_on_carriage_return: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> ManagedProcess:
     process_env = None
@@ -51,7 +52,12 @@ def start_logged_process(
         if process.stdout is None:
             return
 
-        for line in _iter_output_lines(process.stdout):
+        lines = (
+            _iter_output_lines(process.stdout)
+            if split_on_carriage_return
+            else _iter_newline_output_lines(process.stdout)
+        )
+        for line in lines:
             if transform_line is not None:
                 line = transform_line(line)
             if should_print_line is None or should_print_line(line):
@@ -69,6 +75,11 @@ def start_logged_process(
     )
     output_thread.start()
     return ManagedProcess(process=process, prefix=prefix, output_thread=output_thread)
+
+
+def _iter_newline_output_lines(output: IO[str]) -> Iterator[str]:
+    for raw_line in output:
+        yield raw_line.rstrip("\r\n")
 
 
 def _iter_output_lines(output: IO[str]) -> Iterator[str]:

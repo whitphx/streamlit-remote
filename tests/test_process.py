@@ -43,3 +43,13 @@ def test_iter_output_lines_splits_on_carriage_return() -> None:
         "third",
         "fourth",
     ]
+
+
+def test_iter_newline_output_lines_preserves_bare_carriage_return() -> None:
+    output = StringIO("first\rsecond\nthird\r\nfourth")
+
+    assert list(process._iter_newline_output_lines(output)) == [
+        "first\rsecond",
+        "third",
+        "fourth",
+    ]

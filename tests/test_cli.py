@@ -786,6 +786,9 @@ class UnavailableProvider:
     def parse_public_url(self, line: str) -> str | None:
         return None
 
+    def normalize_log_line(self, line: str) -> str:
+        return line
+
     def get_public_url(self) -> str | None:
         return None
 
@@ -812,6 +815,9 @@ class FakeProvider:
 
     def parse_public_url(self, line: str) -> str | None:
         return None
+
+    def normalize_log_line(self, line: str) -> str:
+        return line
 
     def get_public_url(self) -> str | None:
         return None
