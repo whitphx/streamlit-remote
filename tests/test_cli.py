@@ -691,7 +691,16 @@ def test_run_cli_dry_run_prints_cloudflare_self_signed_origin_flag(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--https", "self-signed"])
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--https",
+            "self-signed",
+            "--provider",
+            "cloudflare",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
