@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the zrok executable.",
     )
     parser.add_argument(
+        "--pinggy-binary",
+        type=Path,
+        help="Path to the ssh executable used by Pinggy.",
+    )
+    parser.add_argument(
         "--https",
         dest="https_mode",
         default="off",
@@ -238,6 +243,9 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
     if namespace.zrok_binary is not None and namespace.no_remote:
         raise CliError("`--zrok-binary` requires remote access. Remove `--no-remote`.")
 
+    if namespace.pinggy_binary is not None and namespace.no_remote:
+        raise CliError("`--pinggy-binary` requires remote access. Remove `--no-remote`.")
+
     if namespace.provider is None:
         namespace.provider = provider_implied_by_options(namespace)
 
@@ -252,6 +260,9 @@ def validate_cli_options(namespace: argparse.Namespace) -> None:
 
     if namespace.zrok_binary is not None and namespace.provider != "zrok":
         raise CliError("`--zrok-binary` can only be used with `--provider zrok`.")
+
+    if namespace.pinggy_binary is not None and namespace.provider != "pinggy":
+        raise CliError("`--pinggy-binary` can only be used with `--provider pinggy`.")
 
     if namespace.mkcert_binary is not None and namespace.https_mode != "mkcert":
         raise CliError("`--mkcert-binary` can only be used with `--https mkcert`.")
@@ -292,6 +303,8 @@ def provider_implied_by_options(namespace: argparse.Namespace) -> str | None:
         implied.append("ngrok")
     if namespace.zrok_binary is not None:
         implied.append("zrok")
+    if namespace.pinggy_binary is not None:
+        implied.append("pinggy")
 
     if len(implied) > 1:
         raise CliError(
@@ -505,6 +518,8 @@ def run(namespace: argparse.Namespace) -> int:
                     namespace.tunnel_log_level,
                 ),
                 write_log=display.log,
+                transform_line=provider.normalize_log_line,
+                split_on_carriage_return=provider.name == "pinggy",
             )
             display.set_status(provider.log_prefix, "running")
             public_url_poll_thread = threading.Thread(
@@ -898,6 +913,9 @@ def selected_tunnel_binary(namespace: argparse.Namespace) -> Path | None:
 
     if namespace.provider == "zrok":
         return namespace.zrok_binary
+
+    if namespace.provider == "pinggy":
+        return namespace.pinggy_binary
 
     return None
 

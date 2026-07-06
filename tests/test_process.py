@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from typing import Any
 
 import pytest
@@ -15,7 +16,7 @@ def test_start_logged_process_merges_environment_overrides(
 
     class FakePopen:
         def __init__(self, command: list[str], **kwargs: Any) -> None:
-            self.stdout: list[str] = []
+            self.stdout = StringIO()
             captured["command"] = command
             captured["kwargs"] = kwargs
 
@@ -31,3 +32,24 @@ def test_start_logged_process_merges_environment_overrides(
     assert captured["command"] == ["streamlit"]
     assert captured["kwargs"]["env"]["STREAMLIT_REMOTE_TEST_ENV"] == "kept"
     assert captured["kwargs"]["env"]["COLUMNS"] == "24"
+
+
+def test_iter_output_lines_splits_on_carriage_return() -> None:
+    output = StringIO("first\rsecond\nthird\r\nfourth")
+
+    assert list(process._iter_output_lines(output)) == [
+        "first",
+        "second",
+        "third",
+        "fourth",
+    ]
+
+
+def test_iter_newline_output_lines_preserves_bare_carriage_return() -> None:
+    output = StringIO("first\rsecond\nthird\r\nfourth")
+
+    assert list(process._iter_newline_output_lines(output)) == [
+        "first\rsecond",
+        "third",
+        "fourth",
+    ]

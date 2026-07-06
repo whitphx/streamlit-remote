@@ -254,6 +254,23 @@ def test_run_cli_dry_run_prints_zrok_command(
     assert "zrok share public --headless http://localhost:8501" in captured.out
 
 
+def test_run_cli_dry_run_prints_pinggy_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "pinggy"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert (
+        "ssh -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR "
+        "-p 443 -R0:localhost:8501 free.pinggy.io"
+    ) in captured.out
+
+
 def test_run_cli_dry_run_uses_custom_zrok_binary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -276,6 +293,33 @@ def test_run_cli_dry_run_uses_custom_zrok_binary(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert f"{zrok_binary} share public --headless http://localhost:8501" in captured.out
+
+
+def test_run_cli_dry_run_uses_custom_pinggy_binary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    pinggy_binary = tmp_path / "bin" / "ssh"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--provider",
+            "pinggy",
+            "--pinggy-binary",
+            str(pinggy_binary),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert (
+        f"{pinggy_binary} -T -o ExitOnForwardFailure=yes -o LogLevel=ERROR "
+        "-p 443 -R0:localhost:8501 free.pinggy.io"
+    ) in captured.out
 
 
 def test_run_cli_dry_run_prints_zrok_self_signed_origin_flag(
@@ -536,6 +580,29 @@ def test_run_cli_rejects_zrok_binary_with_ngrok(
     assert "`--zrok-binary` can only be used with `--provider zrok`" in capsys.readouterr().err
 
 
+def test_run_cli_rejects_pinggy_binary_with_ngrok(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--provider",
+            "ngrok",
+            "--pinggy-binary",
+            str(tmp_path / "ssh"),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "`--pinggy-binary` can only be used with `--provider pinggy`" in (
+        capsys.readouterr().err
+    )
+
+
 def test_run_cli_rejects_mkcert_binary_without_mkcert_https(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -624,7 +691,16 @@ def test_run_cli_dry_run_prints_cloudflare_self_signed_origin_flag(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--https", "self-signed"])
+    exit_code = cli.run_cli(
+        [
+            str(app_path),
+            "--dry-run",
+            "--https",
+            "self-signed",
+            "--provider",
+            "cloudflare",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -710,6 +786,9 @@ class UnavailableProvider:
     def parse_public_url(self, line: str) -> str | None:
         return None
 
+    def normalize_log_line(self, line: str) -> str:
+        return line
+
     def get_public_url(self) -> str | None:
         return None
 
@@ -736,6 +815,9 @@ class FakeProvider:
 
     def parse_public_url(self, line: str) -> str | None:
         return None
+
+    def normalize_log_line(self, line: str) -> str:
+        return line
 
     def get_public_url(self) -> str | None:
         return None

@@ -46,6 +46,9 @@ class CloudflareQuickTunnelProvider:
             return None
         return match.group(0)
 
+    def normalize_log_line(self, line: str) -> str:
+        return line
+
     def get_public_url(self) -> str | None:
         return None
 
