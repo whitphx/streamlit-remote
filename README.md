@@ -276,6 +276,31 @@ uv run basedpyright
 uv run pytest
 ```
 
+### Provider Smoke Testing
+
+Use the provider smoke app before adding or changing tunnel providers:
+
+```bash
+uv run st-remote examples/provider_smoke.py --provider cloudflare
+uv run st-remote examples/provider_smoke.py --provider ngrok
+uv run st-remote examples/provider_smoke.py --provider zrok
+```
+
+The provider passes the basic smoke test when the remote HTTPS URL opens, widget interactions update immediately, button clicks preserve session state, rerun refreshes the timestamp, and no persistent Streamlit reconnect/disconnect banner appears.
+
+For output parsing or terminal display issues, rerun with plain logs:
+
+```bash
+uv run st-remote examples/provider_smoke.py --provider zrok --no-tui --tunnel-log-level info
+```
+
+For local HTTPS compatibility, repeat the same provider with:
+
+```bash
+uv run st-remote examples/provider_smoke.py --provider zrok --https self-signed
+uv run st-remote examples/provider_smoke.py --provider zrok --https mkcert
+```
+
 Install the local pre-commit hooks with:
 
 ```bash
