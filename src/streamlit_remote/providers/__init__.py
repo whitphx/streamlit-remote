@@ -8,6 +8,7 @@ from streamlit_remote.providers.ngrok import NgrokProvider
 from streamlit_remote.providers.zrok import ZrokProvider
 
 TunnelLogLevel = Literal["info", "warn", "error", "off"]
+PROVIDER_NAMES = ("cloudflare", "ngrok", "zrok")
 
 
 class TunnelProvider(Protocol):
