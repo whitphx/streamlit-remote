@@ -18,7 +18,7 @@ This package requires Python 3.10 or newer.
 st-remote app.py
 ```
 
-This starts Streamlit on `http://localhost:8501`, starts the first available remote tunnel provider, prefixes logs from both child processes, prints the public HTTPS URL once the provider reports it, and opens that remote URL in your browser. The automatic provider order is Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, then localhost.run. Pass `--provider` to choose one explicitly.
+This starts Streamlit, lets Streamlit choose the local port when `--port` is not specified, starts the first available remote tunnel provider, prefixes logs from both child processes, prints the public HTTPS URL once the provider reports it, and opens that remote URL in your browser. The automatic provider order is Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, then localhost.run. Pass `--provider` to choose one explicitly.
 
 You can also use the alias:
 
@@ -29,7 +29,7 @@ streamlit-remote app.py
 ## Options
 
 ```bash
-st-remote APP [--port 8501] [--host localhost] [--https off] [--provider PROVIDER]
+st-remote APP [--port PORT] [--host localhost] [--https off] [--provider PROVIDER]
 ```
 
 Useful options:
@@ -61,6 +61,8 @@ st-remote app.py -- --server.headless true
 ```
 
 Extra arguments after `--` are passed to `python -m streamlit run`.
+
+If `--port` is omitted, `st-remote` does not pass a port to Streamlit. It waits for Streamlit to report the selected local port, then starts the remote tunnel against that local URL. If `--port` is specified, that port is passed to Streamlit explicitly.
 
 `st-remote` starts Streamlit in headless mode so Streamlit does not open the local URL automatically. When remote access is enabled, `st-remote` opens the detected remote HTTPS URL instead. Use `--no-browser` to suppress browser opening.
 

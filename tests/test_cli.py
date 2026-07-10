@@ -27,6 +27,12 @@ def test_parse_args_accepts_streamlit_args_after_separator() -> None:
     assert not namespace.no_browser
 
 
+def test_parse_args_omits_port_by_default() -> None:
+    namespace = cli.parse_args(["app.py"])
+
+    assert namespace.port is None
+
+
 def test_build_streamlit_command() -> None:
     command = cli.build_streamlit_command(
         Path("app.py"),
@@ -51,6 +57,32 @@ def test_build_streamlit_command() -> None:
         "--server.runOnSave",
         "true",
     ]
+
+
+def test_build_streamlit_command_without_port() -> None:
+    command = cli.build_streamlit_command(Path("app.py"), "127.0.0.1", None)
+
+    assert "--server.port" not in command
+
+
+def test_parse_streamlit_local_server() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "  Local URL: http://localhost:8502",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server == cli.LocalServerConfig(host="localhost", port=8502, scheme="http")
+
+
+def test_parse_streamlit_local_server_strips_terminal_sequences() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "\x1b[34m  Local URL:\x1b[0m https://localhost:8503",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server == cli.LocalServerConfig(host="localhost", port=8503, scheme="https")
 
 
 def test_build_streamlit_command_with_viewer_toolbar_mode() -> None:
@@ -128,7 +160,11 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     assert exit_code == 0
     assert "Streamlit command:" in captured.out
     assert "--client.toolbarMode developer" in captured.out
-    assert "cloudflared tunnel --url http://localhost:8501" in captured.out
+    assert "--server.port" not in captured.out
+    assert "Tunnel command: built at runtime after Streamlit reports its selected port" in (
+        captured.out
+    )
+    assert "Tunnel provider: cloudflare" in captured.out
 
 
 def test_run_cli_dry_run_chooses_available_provider_without_provider_option(
@@ -146,7 +182,7 @@ def test_run_cli_dry_run_chooses_available_provider_without_provider_option(
 
     monkeypatch.setattr(cli, "get_provider", get_fake_provider)
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--port", "8501"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -179,6 +215,8 @@ def test_run_cli_dry_run_uses_custom_cloudflared_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--cloudflared-binary",
             str(cloudflared_binary),
         ]
@@ -200,6 +238,8 @@ def test_run_cli_dry_run_prints_managed_https_ngrok_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--https",
             "self-signed",
             "--provider",
@@ -228,6 +268,8 @@ def test_run_cli_dry_run_uses_custom_ngrok_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--ngrok-binary",
@@ -247,7 +289,7 @@ def test_run_cli_dry_run_prints_zrok_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "zrok"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--port", "8501", "--provider", "zrok"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -261,7 +303,7 @@ def test_run_cli_dry_run_prints_pinggy_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "pinggy"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--port", "8501", "--provider", "pinggy"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -278,7 +320,9 @@ def test_run_cli_dry_run_prints_localhost_run_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "localhost-run"])
+    exit_code = cli.run_cli(
+        [str(app_path), "--dry-run", "--port", "8501", "--provider", "localhost-run"]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -300,6 +344,8 @@ def test_run_cli_dry_run_uses_custom_zrok_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "zrok",
             "--zrok-binary",
@@ -324,6 +370,8 @@ def test_run_cli_dry_run_uses_custom_pinggy_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "pinggy",
             "--pinggy-binary",
@@ -351,6 +399,8 @@ def test_run_cli_dry_run_uses_custom_localhost_run_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "localhost-run",
             "--localhost-run-binary",
@@ -377,6 +427,8 @@ def test_run_cli_dry_run_prints_zrok_self_signed_origin_flag(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "zrok",
             "--https",
@@ -400,6 +452,8 @@ def test_run_cli_dry_run_prints_ngrok_off_log_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--tunnel-log-level",
@@ -423,6 +477,8 @@ def test_run_cli_dry_run_prints_ngrok_oauth_policy_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--remote-auth",
@@ -449,6 +505,8 @@ def test_run_cli_dry_run_defaults_ngrok_oauth_provider_to_google(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--remote-auth",
@@ -468,7 +526,9 @@ def test_run_cli_dry_run_infers_ngrok_provider_from_remote_auth(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--remote-auth", "oauth"])
+    exit_code = cli.run_cli(
+        [str(app_path), "--dry-run", "--port", "8501", "--remote-auth", "oauth"]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -512,6 +572,8 @@ def test_run_cli_dry_run_prints_ngrok_custom_policy_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--ngrok-traffic-policy-file",
@@ -549,6 +611,8 @@ def test_run_cli_dry_run_infers_ngrok_provider_from_ngrok_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--ngrok-binary",
             str(ngrok_binary),
         ]
@@ -763,6 +827,8 @@ def test_run_cli_dry_run_prints_cloudflare_self_signed_origin_flag(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--https",
             "self-signed",
             "--provider",
@@ -1443,7 +1509,9 @@ def test_run_no_remote_opens_local_https_url(
         ),
     )
 
-    namespace = cli.parse_args([str(app_path), "--https", "self-signed", "--no-remote"])
+    namespace = cli.parse_args(
+        [str(app_path), "--https", "self-signed", "--no-remote", "--port", "8501"]
+    )
     exit_code = cli.run(namespace)
 
     assert exit_code == 0
@@ -1478,12 +1546,91 @@ def test_run_no_remote_no_browser_does_not_open_local_url(
     )
 
     namespace = cli.parse_args(
-        [str(app_path), "--https", "self-signed", "--no-remote", "--no-browser"]
+        [
+            str(app_path),
+            "--https",
+            "self-signed",
+            "--no-remote",
+            "--no-browser",
+            "--port",
+            "8501",
+        ]
     )
     exit_code = cli.run(namespace)
 
     assert exit_code == 0
     assert opened == []
+
+
+def test_run_uses_streamlit_reported_port_for_tunnel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    started_processes: list[dict[str, object]] = []
+    local_urls: list[str] = []
+    listened: list[tuple[str, int]] = []
+
+    display = SimpleNamespace(
+        start=lambda: None,
+        stop=lambda: None,
+        switch_to_plain=lambda: False,
+        switch_to_rich=lambda: False,
+        toggle_display=lambda: False,
+        report_process_exit=lambda source, returncode: None,
+        set_local_url=local_urls.append,
+        set_remote_url=lambda url: None,
+        set_status=lambda component, status: None,
+        set_shortcuts_visible=lambda visible: None,
+        scroll_log_up=lambda: False,
+        scroll_log_down=lambda: False,
+        reset_log_scroll=lambda: False,
+        info=lambda message: None,
+        error=lambda message: None,
+        log=lambda source, line: None,
+        streamlit_subprocess_columns=lambda: None,
+    )
+
+    def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
+        started_processes.append({"command": command, "prefix": prefix, **kwargs})
+        on_line = kwargs.get("on_line")
+        if prefix == cli.STREAMLIT_SOURCE and callable(on_line):
+            on_line("  Local URL: http://localhost:8502")
+
+        return SimpleNamespace(
+            process=SimpleNamespace(
+                returncode=0,
+                poll=lambda: 0,
+                terminate=lambda: None,
+                wait=lambda timeout=None: 0,
+            ),
+            prefix=prefix,
+            output_thread=SimpleNamespace(join=lambda timeout=None: None),
+        )
+
+    def wait_for_port(host: str, port: int) -> bool:
+        listened.append((host, port))
+        return True
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: FakeProvider(name, True))
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: display)
+    monkeypatch.setattr(cli, "start_logged_process", start_process)
+    monkeypatch.setattr(cli, "wait_until_listening", wait_for_port)
+
+    namespace = cli.parse_args([str(app_path), "--provider", "cloudflare", "--no-browser"])
+    exit_code = cli.run(namespace)
+
+    assert exit_code == 0
+    assert started_processes[0]["prefix"] == cli.STREAMLIT_SOURCE
+    streamlit_command = cast(list[str], started_processes[0]["command"])
+    tunnel_command = cast(list[str], started_processes[1]["command"])
+    assert "--server.port" not in streamlit_command
+    assert tunnel_command == ["cloudflare", "tunnel", "http://localhost:8502"]
+    assert local_urls == ["http://localhost:8502"]
+    assert listened == [("localhost", 8502)]
 
 
 def test_run_passes_display_columns_to_streamlit_process(
@@ -1533,7 +1680,7 @@ def test_run_passes_display_columns_to_streamlit_process(
     monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: display)
     monkeypatch.setattr(cli, "start_logged_process", start_process)
 
-    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser"])
+    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser", "--port", "8501"])
     exit_code = cli.run(namespace)
 
     assert exit_code == 0
