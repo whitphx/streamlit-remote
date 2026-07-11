@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import termios
 import threading
 import time
@@ -75,6 +76,16 @@ def test_parse_streamlit_local_server() -> None:
     assert local_server == cli.LocalServerConfig(host="localhost", port=8502, scheme="http")
 
 
+def test_parse_streamlit_local_server_matches_specific_address_banner() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "  URL: http://localhost:8501",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server == cli.LocalServerConfig(host="localhost", port=8501, scheme="http")
+
+
 def test_parse_streamlit_local_server_strips_terminal_sequences() -> None:
     local_server = cli.parse_streamlit_local_server(
         "\x1b[34m  Local URL:\x1b[0m https://localhost:8503",
@@ -83,6 +94,34 @@ def test_parse_streamlit_local_server_strips_terminal_sequences() -> None:
     )
 
     assert local_server == cli.LocalServerConfig(host="localhost", port=8503, scheme="https")
+
+
+def test_parse_streamlit_local_server_ignores_url_with_invalid_port() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "See the Local URL: http://localhost:8502, then connect.",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server is None
+
+
+def test_wait_for_streamlit_local_server_returns_detected_value() -> None:
+    handle = make_process_handle("streamlit", poll_results=[None])
+    detected: queue.Queue[cli.LocalServerConfig] = queue.Queue(maxsize=1)
+    config = cli.LocalServerConfig(host="localhost", port=8502, scheme="http")
+    detected.put(config)
+
+    assert cli.wait_for_streamlit_local_server(handle, detected, interval=0.01) is config
+
+
+def test_wait_for_streamlit_local_server_without_timeout_waits_until_process_exit() -> None:
+    handle = make_process_handle("streamlit", poll_results=[None, None, 0])
+    detected: queue.Queue[cli.LocalServerConfig] = queue.Queue(maxsize=1)
+
+    result = cli.wait_for_streamlit_local_server(handle, detected, timeout=None, interval=0.01)
+
+    assert result is None
 
 
 def test_build_streamlit_command_with_viewer_toolbar_mode() -> None:
@@ -1562,6 +1601,30 @@ def test_run_no_remote_no_browser_does_not_open_local_url(
     assert opened == []
 
 
+def make_fake_display(**overrides: object) -> SimpleNamespace:
+    attrs: dict[str, object] = {
+        "start": lambda: None,
+        "stop": lambda: None,
+        "switch_to_plain": lambda: False,
+        "switch_to_rich": lambda: False,
+        "toggle_display": lambda: False,
+        "report_process_exit": lambda source, returncode: None,
+        "set_local_url": lambda url: None,
+        "set_remote_url": lambda url: None,
+        "set_status": lambda component, status: None,
+        "set_shortcuts_visible": lambda visible: None,
+        "scroll_log_up": lambda: False,
+        "scroll_log_down": lambda: False,
+        "reset_log_scroll": lambda: False,
+        "info": lambda message: None,
+        "error": lambda message: None,
+        "log": lambda source, line: None,
+        "streamlit_subprocess_columns": lambda: None,
+    }
+    attrs.update(overrides)
+    return SimpleNamespace(**attrs)
+
+
 def test_run_uses_streamlit_reported_port_for_tunnel(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1572,25 +1635,7 @@ def test_run_uses_streamlit_reported_port_for_tunnel(
     local_urls: list[str] = []
     listened: list[tuple[str, int]] = []
 
-    display = SimpleNamespace(
-        start=lambda: None,
-        stop=lambda: None,
-        switch_to_plain=lambda: False,
-        switch_to_rich=lambda: False,
-        toggle_display=lambda: False,
-        report_process_exit=lambda source, returncode: None,
-        set_local_url=local_urls.append,
-        set_remote_url=lambda url: None,
-        set_status=lambda component, status: None,
-        set_shortcuts_visible=lambda visible: None,
-        scroll_log_up=lambda: False,
-        scroll_log_down=lambda: False,
-        reset_log_scroll=lambda: False,
-        info=lambda message: None,
-        error=lambda message: None,
-        log=lambda source, line: None,
-        streamlit_subprocess_columns=lambda: None,
-    )
+    display = make_fake_display(set_local_url=local_urls.append)
 
     def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
         started_processes.append({"command": command, "prefix": prefix, **kwargs})
@@ -1641,25 +1686,7 @@ def test_run_passes_display_columns_to_streamlit_process(
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
     started_processes: list[dict[str, object]] = []
 
-    display = SimpleNamespace(
-        start=lambda: None,
-        stop=lambda: None,
-        switch_to_plain=lambda: False,
-        switch_to_rich=lambda: False,
-        toggle_display=lambda: False,
-        report_process_exit=lambda source, returncode: None,
-        set_local_url=lambda url: None,
-        set_remote_url=lambda url: None,
-        set_status=lambda component, status: None,
-        set_shortcuts_visible=lambda visible: None,
-        scroll_log_up=lambda: False,
-        scroll_log_down=lambda: False,
-        reset_log_scroll=lambda: False,
-        info=lambda message: None,
-        error=lambda message: None,
-        log=lambda source, line: None,
-        streamlit_subprocess_columns=lambda: 33,
-    )
+    display = make_fake_display(streamlit_subprocess_columns=lambda: 33)
 
     def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
         started_processes.append({"command": command, "prefix": prefix, **kwargs})
