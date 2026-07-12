@@ -2,6 +2,17 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.11.0'></a>
+## 0.11.0 — 2026-07-12
+
+### Added
+
+- Added localhost.run as a remote tunnel provider via `--provider localhost-run`, using OpenSSH reverse tunneling.
+
+### Changed
+
+- Omitted `--port` now lets Streamlit choose the local port before `st-remote` starts the remote tunnel.
+
 <a id='changelog-0.10.0'></a>
 ## 0.10.0 — 2026-07-06
 
