@@ -46,6 +46,8 @@ from streamlit_remote.server import LocalServerConfig, is_port_available, wait_u
 # "Network URL" / "External URL" otherwise; match the shared "URL:" suffix to
 # cover all forms (see streamlit/web/bootstrap.py, _print_url).
 STREAMLIT_URL_RE = re.compile(r"\bURL:\s*(https?://\S+)")
+STREAMLIT_LOCAL_URL_TIMEOUT = 20.0
+STREAMLIT_LOCAL_URL_NO_REMOTE_TIMEOUT = 120.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -426,7 +428,7 @@ def run(namespace: argparse.Namespace) -> int:
     streamlit_command = build_streamlit_command(
         namespace.app,
         namespace.host,
-        local_server.port if local_server is not None else None,
+        namespace.port,
         namespace.streamlit_args,
         https_material=https_material,
         toolbar_mode=namespace.toolbar_mode,
@@ -529,14 +531,14 @@ def run(namespace: argparse.Namespace) -> int:
         )
 
     def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
-        # Restarts can only be requested after startup completed, by which point
-        # local_server is set for both the explicit-port and detected-port paths.
-        current_local_server = cast(LocalServerConfig, local_server)
-
         display.set_status("Streamlit", "restarting")
         display.info("Restarting Streamlit...")
         terminate_processes([current_handle])
         next_handle = start_streamlit_process()
+        current_local_server = local_server
+        if current_local_server is None:
+            display.set_status("Streamlit", "running")
+            return next_handle
         if not wait_until_listening(current_local_server.host, current_local_server.port):
             display.set_status("Streamlit", "restart failed")
             display.error(
@@ -553,41 +555,53 @@ def run(namespace: argparse.Namespace) -> int:
             local_server = wait_for_streamlit_local_server(
                 streamlit_handle,
                 detected_local_server,
-                # Without a tunnel there is no downstream step blocked on the port,
-                # so tolerate an arbitrarily slow Streamlit startup.
-                timeout=None if namespace.no_remote else 20.0,
+                timeout=(
+                    STREAMLIT_LOCAL_URL_NO_REMOTE_TIMEOUT
+                    if namespace.no_remote
+                    else STREAMLIT_LOCAL_URL_TIMEOUT
+                ),
             )
             if local_server is None:
                 if streamlit_handle.process.poll() is not None:
                     raise CliError("Streamlit exited before reporting its local URL.")
-                raise CliError("Streamlit did not report its local URL within the timeout.")
+                if not namespace.no_remote:
+                    raise CliError("Streamlit did not report its local URL within the timeout.")
+                display.info(
+                    "Warning: Streamlit did not report its local URL; "
+                    "browser opening and port-aware restart checks are disabled."
+                )
+            else:
+                display.set_local_url(local_server.url)
+                streamlit_command = build_streamlit_command(
+                    namespace.app,
+                    local_server.host,
+                    local_server.port,
+                    namespace.streamlit_args,
+                    https_material=https_material,
+                    toolbar_mode=namespace.toolbar_mode,
+                )
+                if namespace.no_remote and not namespace.no_browser:
+                    open_browser(local_server.url)
 
-            display.set_local_url(local_server.url)
-            streamlit_command = build_streamlit_command(
-                namespace.app,
+        if not namespace.no_remote:
+            if local_server is None:
+                raise CliError("Streamlit did not report its local URL within the timeout.")
+            if not wait_until_listening(
                 local_server.host,
                 local_server.port,
-                namespace.streamlit_args,
-                https_material=https_material,
-                toolbar_mode=namespace.toolbar_mode,
-            )
-            if namespace.no_remote and not namespace.no_browser:
-                open_browser(local_server.url)
-
-        if not namespace.no_remote and not wait_until_listening(
-            local_server.host,
-            local_server.port,
-        ):
-            raise CliError(
-                f"Streamlit did not start listening on {local_server.url} within the timeout."
-            )
+            ):
+                raise CliError(
+                    f"Streamlit did not start listening on {local_server.url} within the timeout."
+                )
         display.set_status("Streamlit", "running")
 
         if not namespace.no_remote:
             assert provider is not None
+            # The remote path raises above when URL detection leaves this unset.
+            tunnel_local_server = cast(LocalServerConfig, local_server)
             tunnel_command = build_tunnel_command(
                 provider,
-                local_server,
+                tunnel_local_server,
                 namespace,
                 traffic_policy,
             )

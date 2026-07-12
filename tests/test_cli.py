@@ -1678,6 +1678,122 @@ def test_run_uses_streamlit_reported_port_for_tunnel(
     assert listened == [("localhost", 8502)]
 
 
+def test_run_reuses_streamlit_reported_port_for_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    streamlit_commands: list[list[str]] = []
+
+    def start_process(command: list[str], prefix: str, **kwargs: object) -> cli.ManagedProcess:
+        if prefix == cli.STREAMLIT_SOURCE:
+            streamlit_commands.append(command)
+            on_line = kwargs.get("on_line")
+            if callable(on_line):
+                on_line("  URL: http://localhost:8502")
+        return make_process_handle(prefix, poll_results=[None])
+
+    def supervise(
+        streamlit_handle: cli.ManagedProcess,
+        tunnel_handle: cli.ManagedProcess | None,
+        restart_requested: threading.Event,
+        restart_streamlit: object,
+        **kwargs: object,
+    ) -> int:
+        assert callable(restart_streamlit)
+        restart_streamlit(streamlit_handle)
+        return 0
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: FakeProvider(name, True))
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: make_fake_display())
+    monkeypatch.setattr(cli, "start_logged_process", start_process)
+    monkeypatch.setattr(cli, "wait_until_listening", lambda host, port: True)
+    monkeypatch.setattr(cli, "supervise_processes", supervise)
+
+    namespace = cli.parse_args([str(app_path), "--provider", "cloudflare", "--no-browser"])
+
+    assert cli.run(namespace) == 0
+    assert len(streamlit_commands) == 2
+    assert "--server.port" not in streamlit_commands[0]
+    assert streamlit_commands[1][streamlit_commands[1].index("--server.port") + 1] == "8502"
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected_message"),
+    [
+        (1, "Streamlit exited before reporting its local URL."),
+        (None, "Streamlit did not report its local URL within the timeout."),
+    ],
+)
+def test_run_maps_local_url_detection_failure_to_cli_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int | None,
+    expected_message: str,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    handle = make_process_handle("streamlit", returncode=returncode, poll_results=[returncode])
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: FakeProvider(name, True))
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: make_fake_display())
+    monkeypatch.setattr(cli, "start_logged_process", lambda *args, **kwargs: handle)
+    monkeypatch.setattr(cli, "wait_for_streamlit_local_server", lambda *args, **kwargs: None)
+
+    namespace = cli.parse_args([str(app_path), "--provider", "cloudflare", "--no-browser"])
+
+    with pytest.raises(cli.CliError, match=expected_message):
+        cli.run(namespace)
+
+
+def test_run_no_remote_continues_when_local_url_is_not_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    messages: list[str] = []
+    wait_timeouts: list[float | None] = []
+
+    def wait_for_local_server(
+        handle: cli.ManagedProcess,
+        detected: queue.Queue[cli.LocalServerConfig],
+        *,
+        timeout: float | None = cli.STREAMLIT_LOCAL_URL_TIMEOUT,
+        interval: float = 0.05,
+    ) -> None:
+        wait_timeouts.append(timeout)
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(
+        cli,
+        "make_runtime_display",
+        lambda use_tui: make_fake_display(info=messages.append),
+    )
+    monkeypatch.setattr(
+        cli,
+        "start_logged_process",
+        lambda command, prefix, **kwargs: make_process_handle(prefix, poll_results=[None]),
+    )
+    monkeypatch.setattr(cli, "wait_for_streamlit_local_server", wait_for_local_server)
+    monkeypatch.setattr(cli, "supervise_processes", lambda *args, **kwargs: 0)
+
+    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser"])
+
+    assert cli.run(namespace) == 0
+    assert wait_timeouts == [cli.STREAMLIT_LOCAL_URL_NO_REMOTE_TIMEOUT]
+    assert messages[-1] == (
+        "Warning: Streamlit did not report its local URL; "
+        "browser opening and port-aware restart checks are disabled."
+    )
+
+
 def test_run_passes_display_columns_to_streamlit_process(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

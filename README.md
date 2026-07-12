@@ -64,6 +64,8 @@ Extra arguments after `--` are passed to `python -m streamlit run`.
 
 If `--port` is omitted, `st-remote` does not pass a port to Streamlit. It waits for Streamlit to report the selected local port, then starts the remote tunnel against that local URL. If `--port` is specified, that port is passed to Streamlit explicitly.
 
+With `--dry-run`, pass `--port` to print the complete provider-specific tunnel command and options. Without a port, the tunnel command can only be built after Streamlit starts, so the dry run reports that deferred step instead.
+
 `st-remote` starts Streamlit in headless mode so Streamlit does not open the local URL automatically. When remote access is enabled, `st-remote` opens the detected remote HTTPS URL instead. Use `--no-browser` to suppress browser opening.
 
 `st-remote` also sets Streamlit's toolbar mode to `developer` by default so controls such as rerun and clear cache remain visible through remote proxy hostnames. Use `--toolbar-mode viewer` to hide those developer toolbar actions, or `--toolbar-mode auto` to use Streamlit's default hostname-sensitive behavior.
