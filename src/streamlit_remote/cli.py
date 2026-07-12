@@ -4,6 +4,8 @@ import argparse
 import importlib.util
 import json
 import os
+import queue
+import re
 import select
 import shlex
 import sys
@@ -13,7 +15,8 @@ import webbrowser
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
+from urllib.parse import urlparse
 
 from streamlit_remote.https import (
     HttpsError,
@@ -34,8 +37,17 @@ from streamlit_remote.providers.ngrok import (
     planned_managed_oauth_policy,
     prepare_managed_oauth_policy,
 )
+from streamlit_remote.providers.terminal import normalize_terminal_line
 from streamlit_remote.runtime_display import STREAMLIT_SOURCE, make_runtime_display
 from streamlit_remote.server import LocalServerConfig, is_port_available, wait_until_listening
+
+# Streamlit labels its startup URL "URL" when server.address names a specific
+# host (which st-remote's --server.address always does) and "Local URL" /
+# "Network URL" / "External URL" otherwise; match the shared "URL:" suffix to
+# cover all forms (see streamlit/web/bootstrap.py, _print_url).
+STREAMLIT_URL_RE = re.compile(r"\bURL:\s*(https?://\S+)")
+STREAMLIT_LOCAL_URL_TIMEOUT = 20.0
+STREAMLIT_LOCAL_URL_NO_REMOTE_TIMEOUT = 120.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,7 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run a Streamlit app with optional remote HTTPS access.",
     )
     parser.add_argument("app", type=Path, metavar="APP", help="Streamlit app file path.")
-    parser.add_argument("--port", type=int, default=8501, help="Local Streamlit port.")
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="Local Streamlit port. If omitted, Streamlit chooses an available port.",
+    )
     parser.add_argument("--host", default="localhost", help="Local Streamlit host.")
     parser.add_argument(
         "--provider",
@@ -186,7 +202,7 @@ def split_streamlit_args(argv: Sequence[str]) -> tuple[list[str], list[str]]:
 def build_streamlit_command(
     app_path: Path,
     host: str,
-    port: int,
+    port: int | None,
     streamlit_args: Sequence[str] = (),
     https_material: HttpsMaterial | None = None,
     toolbar_mode: str = "developer",
@@ -199,13 +215,19 @@ def build_streamlit_command(
         str(app_path),
         "--server.address",
         host,
-        "--server.port",
-        str(port),
-        "--server.headless",
-        "true",
-        "--client.toolbarMode",
-        toolbar_mode,
     ]
+
+    if port is not None:
+        command.extend(["--server.port", str(port)])
+
+    command.extend(
+        [
+            "--server.headless",
+            "true",
+            "--client.toolbarMode",
+            toolbar_mode,
+        ]
+    )
 
     if https_material is not None:
         command.extend(
@@ -349,14 +371,13 @@ def run(namespace: argparse.Namespace) -> int:
     validate_app_path(namespace.app)
 
     scheme = "https" if namespace.https_mode != "off" else "http"
-    local_server = LocalServerConfig(
-        host=namespace.host,
-        port=namespace.port,
-        scheme=scheme,
+    local_server: LocalServerConfig | None = (
+        LocalServerConfig(host=namespace.host, port=namespace.port, scheme=scheme)
+        if namespace.port is not None
+        else None
     )
 
     provider = None
-    tunnel_command: list[str] | None = None
     traffic_policy: PreparedNgrokTrafficPolicy | None = None
     if not namespace.no_remote:
         provider = resolve_cli_provider(
@@ -364,29 +385,30 @@ def run(namespace: argparse.Namespace) -> int:
             allow_unavailable_default=namespace.dry_run,
         )
         traffic_policy = prepare_cli_ngrok_traffic_policy(namespace, dry_run=True)
-        tunnel_command = provider.build_command(
-            local_server.url,
-            origin_tls_verify=namespace.https_mode != "self-signed",
-            tunnel_log_level=namespace.tunnel_log_level,
-            traffic_policy_file=(
-                traffic_policy.traffic_policy_file if traffic_policy is not None else None
-            ),
-        )
 
     if namespace.dry_run:
         https_material = prepare_cli_https_material(namespace)
         streamlit_command = build_streamlit_command(
             namespace.app,
-            local_server.host,
-            local_server.port,
+            namespace.host,
+            namespace.port,
             namespace.streamlit_args,
             https_material=https_material,
             toolbar_mode=namespace.toolbar_mode,
         )
         print(f"Streamlit command:\n  {shlex.join(streamlit_command)}")
-        if tunnel_command is None:
+        if provider is None:
             print("Remote access: disabled")
+        elif local_server is None:
+            print("Tunnel command: built at runtime after Streamlit reports its selected port")
+            print(f"Tunnel provider: {provider.name}")
         else:
+            tunnel_command = build_tunnel_command(
+                provider,
+                local_server,
+                namespace,
+                traffic_policy,
+            )
             print(f"Tunnel command:\n  {shlex.join(tunnel_command)}")
         if namespace.https_mode == "self-signed":
             print("HTTPS: managed self-signed certificate will be prepared at runtime")
@@ -395,7 +417,7 @@ def run(namespace: argparse.Namespace) -> int:
         return 0
 
     require_streamlit()
-    if not is_port_available(local_server.host, local_server.port):
+    if local_server is not None and not is_port_available(local_server.host, local_server.port):
         raise CliError(f"Port {local_server.port} is not available on {local_server.host}.")
 
     if provider is not None and not provider.is_available():
@@ -405,31 +427,23 @@ def run(namespace: argparse.Namespace) -> int:
     traffic_policy = prepare_cli_ngrok_traffic_policy(namespace, dry_run=False)
     streamlit_command = build_streamlit_command(
         namespace.app,
-        local_server.host,
-        local_server.port,
+        namespace.host,
+        namespace.port,
         namespace.streamlit_args,
         https_material=https_material,
         toolbar_mode=namespace.toolbar_mode,
     )
-    if provider is not None:
-        tunnel_command = provider.build_command(
-            local_server.url,
-            origin_tls_verify=namespace.https_mode != "self-signed",
-            tunnel_log_level=namespace.tunnel_log_level,
-            traffic_policy_file=(
-                traffic_policy.traffic_policy_file if traffic_policy is not None else None
-            ),
-        )
 
     display = make_runtime_display(
         use_tui=sys.stdout.isatty() and not namespace.no_tui,
     )
     display.start()
-    display.set_local_url(local_server.url)
+    if local_server is not None:
+        display.set_local_url(local_server.url)
     display.set_status("Streamlit", "starting")
     if namespace.no_remote:
         display.info("Remote access: disabled")
-        if not namespace.no_browser:
+        if local_server is not None and not namespace.no_browser:
             open_browser(local_server.url)
     else:
         if namespace.https_mode == "self-signed" and namespace.provider == "ngrok":
@@ -443,6 +457,8 @@ def run(namespace: argparse.Namespace) -> int:
 
     remote_url_printed = threading.Event()
     remote_url_lock = threading.Lock()
+    detected_local_server: queue.Queue[LocalServerConfig] = queue.Queue(maxsize=1)
+    local_server_reported = False
 
     def report_remote_url(public_url: str) -> None:
         with remote_url_lock:
@@ -461,6 +477,24 @@ def run(namespace: argparse.Namespace) -> int:
         public_url = provider.parse_public_url(line)
         if public_url is not None:
             report_remote_url(public_url)
+
+    def on_streamlit_line(line: str) -> None:
+        nonlocal local_server_reported
+
+        if local_server_reported:
+            return
+
+        detected = parse_streamlit_local_server(
+            line,
+            host=namespace.host,
+            default_scheme=scheme,
+        )
+        if detected is None:
+            return
+
+        local_server_reported = True
+        with suppress(queue.Full):
+            detected_local_server.put_nowait(detected)
 
     def poll_provider_public_url() -> None:
         if provider is None:
@@ -491,6 +525,7 @@ def run(namespace: argparse.Namespace) -> int:
         return start_logged_process(
             streamlit_command,
             STREAMLIT_SOURCE,
+            on_line=on_streamlit_line if namespace.port is None else None,
             write_log=display.log,
             env=streamlit_env or None,
         )
@@ -500,10 +535,15 @@ def run(namespace: argparse.Namespace) -> int:
         display.info("Restarting Streamlit...")
         terminate_processes([current_handle])
         next_handle = start_streamlit_process()
-        if not wait_until_listening(local_server.host, local_server.port):
+        current_local_server = local_server
+        if current_local_server is None:
+            display.set_status("Streamlit", "running")
+            return next_handle
+        if not wait_until_listening(current_local_server.host, current_local_server.port):
             display.set_status("Streamlit", "restart failed")
             display.error(
-                f"error: Streamlit did not start listening on {local_server.url} after restart.",
+                "error: Streamlit did not start listening on "
+                f"{current_local_server.url} after restart.",
             )
         else:
             display.set_status("Streamlit", "running")
@@ -511,17 +551,60 @@ def run(namespace: argparse.Namespace) -> int:
 
     try:
         streamlit_handle = start_streamlit_process()
-        if tunnel_command is not None and not wait_until_listening(
-            local_server.host,
-            local_server.port,
-        ):
-            raise CliError(
-                f"Streamlit did not start listening on {local_server.url} within the timeout."
+        if local_server is None:
+            local_server = wait_for_streamlit_local_server(
+                streamlit_handle,
+                detected_local_server,
+                timeout=(
+                    STREAMLIT_LOCAL_URL_NO_REMOTE_TIMEOUT
+                    if namespace.no_remote
+                    else STREAMLIT_LOCAL_URL_TIMEOUT
+                ),
             )
+            if local_server is None:
+                if streamlit_handle.process.poll() is not None:
+                    raise CliError("Streamlit exited before reporting its local URL.")
+                if not namespace.no_remote:
+                    raise CliError("Streamlit did not report its local URL within the timeout.")
+                display.info(
+                    "Warning: Streamlit did not report its local URL; "
+                    "browser opening and port-aware restart checks are disabled."
+                )
+            else:
+                display.set_local_url(local_server.url)
+                streamlit_command = build_streamlit_command(
+                    namespace.app,
+                    local_server.host,
+                    local_server.port,
+                    namespace.streamlit_args,
+                    https_material=https_material,
+                    toolbar_mode=namespace.toolbar_mode,
+                )
+                if namespace.no_remote and not namespace.no_browser:
+                    open_browser(local_server.url)
+
+        if not namespace.no_remote:
+            if local_server is None:
+                raise CliError("Streamlit did not report its local URL within the timeout.")
+            if not wait_until_listening(
+                local_server.host,
+                local_server.port,
+            ):
+                raise CliError(
+                    f"Streamlit did not start listening on {local_server.url} within the timeout."
+                )
         display.set_status("Streamlit", "running")
 
-        if tunnel_command is not None:
+        if not namespace.no_remote:
             assert provider is not None
+            # The remote path raises above when URL detection leaves this unset.
+            tunnel_local_server = cast(LocalServerConfig, local_server)
+            tunnel_command = build_tunnel_command(
+                provider,
+                tunnel_local_server,
+                namespace,
+                traffic_policy,
+            )
             tunnel_handle = start_logged_process(
                 tunnel_command,
                 provider.log_prefix,
@@ -601,6 +684,74 @@ def main() -> None:
 
 class CliError(Exception):
     pass
+
+
+def build_tunnel_command(
+    provider: TunnelProvider,
+    local_server: LocalServerConfig,
+    namespace: argparse.Namespace,
+    traffic_policy: PreparedNgrokTrafficPolicy | None,
+) -> list[str]:
+    return provider.build_command(
+        local_server.url,
+        origin_tls_verify=namespace.https_mode != "self-signed",
+        tunnel_log_level=namespace.tunnel_log_level,
+        traffic_policy_file=(
+            traffic_policy.traffic_policy_file if traffic_policy is not None else None
+        ),
+    )
+
+
+def parse_streamlit_local_server(
+    line: str,
+    *,
+    host: str,
+    default_scheme: str,
+) -> LocalServerConfig | None:
+    normalized = normalize_terminal_line(line)
+    match = STREAMLIT_URL_RE.search(normalized)
+    if match is None:
+        return None
+
+    parsed = urlparse(match.group(1))
+    try:
+        port = parsed.port
+    except ValueError:
+        # The greedy match can pick up surrounding text (e.g. trailing
+        # punctuation after the port digits), which makes urlparse raise.
+        # Never propagate: this is called from the output-pump thread, which
+        # has no exception guard.
+        return None
+    if port is None:
+        return None
+
+    scheme = parsed.scheme if parsed.scheme in {"http", "https"} else default_scheme
+    return LocalServerConfig(host=host, port=port, scheme=scheme)
+
+
+def wait_for_streamlit_local_server(
+    streamlit_handle: ManagedProcess,
+    detected_local_server: queue.Queue[LocalServerConfig],
+    timeout: float | None = 20.0,
+    interval: float = 0.1,
+) -> LocalServerConfig | None:
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while deadline is None or time.monotonic() < deadline:
+        wait_timeout = (
+            interval if deadline is None else min(interval, max(0.0, deadline - time.monotonic()))
+        )
+        with suppress(queue.Empty):
+            return detected_local_server.get(timeout=wait_timeout)
+
+        if streamlit_handle.process.poll() is not None:
+            # The process may have printed its URL right before exiting; give the
+            # output pump a moment to drain the pipe before giving up.
+            streamlit_handle.output_thread.join(timeout=1.0)
+            with suppress(queue.Empty):
+                return detected_local_server.get_nowait()
+            return None
+
+    return None
 
 
 def start_restart_shortcut_listener(

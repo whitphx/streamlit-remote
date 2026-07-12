@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import termios
 import threading
 import time
@@ -27,6 +28,12 @@ def test_parse_args_accepts_streamlit_args_after_separator() -> None:
     assert not namespace.no_browser
 
 
+def test_parse_args_omits_port_by_default() -> None:
+    namespace = cli.parse_args(["app.py"])
+
+    assert namespace.port is None
+
+
 def test_build_streamlit_command() -> None:
     command = cli.build_streamlit_command(
         Path("app.py"),
@@ -51,6 +58,70 @@ def test_build_streamlit_command() -> None:
         "--server.runOnSave",
         "true",
     ]
+
+
+def test_build_streamlit_command_without_port() -> None:
+    command = cli.build_streamlit_command(Path("app.py"), "127.0.0.1", None)
+
+    assert "--server.port" not in command
+
+
+def test_parse_streamlit_local_server() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "  Local URL: http://localhost:8502",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server == cli.LocalServerConfig(host="localhost", port=8502, scheme="http")
+
+
+def test_parse_streamlit_local_server_matches_specific_address_banner() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "  URL: http://localhost:8501",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server == cli.LocalServerConfig(host="localhost", port=8501, scheme="http")
+
+
+def test_parse_streamlit_local_server_strips_terminal_sequences() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "\x1b[34m  Local URL:\x1b[0m https://localhost:8503",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server == cli.LocalServerConfig(host="localhost", port=8503, scheme="https")
+
+
+def test_parse_streamlit_local_server_ignores_url_with_invalid_port() -> None:
+    local_server = cli.parse_streamlit_local_server(
+        "See the Local URL: http://localhost:8502, then connect.",
+        host="localhost",
+        default_scheme="http",
+    )
+
+    assert local_server is None
+
+
+def test_wait_for_streamlit_local_server_returns_detected_value() -> None:
+    handle = make_process_handle("streamlit", poll_results=[None])
+    detected: queue.Queue[cli.LocalServerConfig] = queue.Queue(maxsize=1)
+    config = cli.LocalServerConfig(host="localhost", port=8502, scheme="http")
+    detected.put(config)
+
+    assert cli.wait_for_streamlit_local_server(handle, detected, interval=0.01) is config
+
+
+def test_wait_for_streamlit_local_server_without_timeout_waits_until_process_exit() -> None:
+    handle = make_process_handle("streamlit", poll_results=[None, None, 0])
+    detected: queue.Queue[cli.LocalServerConfig] = queue.Queue(maxsize=1)
+
+    result = cli.wait_for_streamlit_local_server(handle, detected, timeout=None, interval=0.01)
+
+    assert result is None
 
 
 def test_build_streamlit_command_with_viewer_toolbar_mode() -> None:
@@ -128,7 +199,11 @@ def test_run_cli_dry_run_prints_commands_without_dependency_checks(
     assert exit_code == 0
     assert "Streamlit command:" in captured.out
     assert "--client.toolbarMode developer" in captured.out
-    assert "cloudflared tunnel --url http://localhost:8501" in captured.out
+    assert "--server.port" not in captured.out
+    assert "Tunnel command: built at runtime after Streamlit reports its selected port" in (
+        captured.out
+    )
+    assert "Tunnel provider: cloudflare" in captured.out
 
 
 def test_run_cli_dry_run_chooses_available_provider_without_provider_option(
@@ -146,7 +221,7 @@ def test_run_cli_dry_run_chooses_available_provider_without_provider_option(
 
     monkeypatch.setattr(cli, "get_provider", get_fake_provider)
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--port", "8501"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -179,6 +254,8 @@ def test_run_cli_dry_run_uses_custom_cloudflared_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--cloudflared-binary",
             str(cloudflared_binary),
         ]
@@ -200,6 +277,8 @@ def test_run_cli_dry_run_prints_managed_https_ngrok_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--https",
             "self-signed",
             "--provider",
@@ -228,6 +307,8 @@ def test_run_cli_dry_run_uses_custom_ngrok_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--ngrok-binary",
@@ -247,7 +328,7 @@ def test_run_cli_dry_run_prints_zrok_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "zrok"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--port", "8501", "--provider", "zrok"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -261,7 +342,7 @@ def test_run_cli_dry_run_prints_pinggy_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "pinggy"])
+    exit_code = cli.run_cli([str(app_path), "--dry-run", "--port", "8501", "--provider", "pinggy"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -278,7 +359,9 @@ def test_run_cli_dry_run_prints_localhost_run_command(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--provider", "localhost-run"])
+    exit_code = cli.run_cli(
+        [str(app_path), "--dry-run", "--port", "8501", "--provider", "localhost-run"]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -300,6 +383,8 @@ def test_run_cli_dry_run_uses_custom_zrok_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "zrok",
             "--zrok-binary",
@@ -324,6 +409,8 @@ def test_run_cli_dry_run_uses_custom_pinggy_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "pinggy",
             "--pinggy-binary",
@@ -351,6 +438,8 @@ def test_run_cli_dry_run_uses_custom_localhost_run_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "localhost-run",
             "--localhost-run-binary",
@@ -377,6 +466,8 @@ def test_run_cli_dry_run_prints_zrok_self_signed_origin_flag(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "zrok",
             "--https",
@@ -400,6 +491,8 @@ def test_run_cli_dry_run_prints_ngrok_off_log_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--tunnel-log-level",
@@ -423,6 +516,8 @@ def test_run_cli_dry_run_prints_ngrok_oauth_policy_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--remote-auth",
@@ -449,6 +544,8 @@ def test_run_cli_dry_run_defaults_ngrok_oauth_provider_to_google(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--remote-auth",
@@ -468,7 +565,9 @@ def test_run_cli_dry_run_infers_ngrok_provider_from_remote_auth(
     app_path = tmp_path / "app.py"
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
 
-    exit_code = cli.run_cli([str(app_path), "--dry-run", "--remote-auth", "oauth"])
+    exit_code = cli.run_cli(
+        [str(app_path), "--dry-run", "--port", "8501", "--remote-auth", "oauth"]
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -512,6 +611,8 @@ def test_run_cli_dry_run_prints_ngrok_custom_policy_command(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--provider",
             "ngrok",
             "--ngrok-traffic-policy-file",
@@ -549,6 +650,8 @@ def test_run_cli_dry_run_infers_ngrok_provider_from_ngrok_binary(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--ngrok-binary",
             str(ngrok_binary),
         ]
@@ -763,6 +866,8 @@ def test_run_cli_dry_run_prints_cloudflare_self_signed_origin_flag(
         [
             str(app_path),
             "--dry-run",
+            "--port",
+            "8501",
             "--https",
             "self-signed",
             "--provider",
@@ -1443,7 +1548,9 @@ def test_run_no_remote_opens_local_https_url(
         ),
     )
 
-    namespace = cli.parse_args([str(app_path), "--https", "self-signed", "--no-remote"])
+    namespace = cli.parse_args(
+        [str(app_path), "--https", "self-signed", "--no-remote", "--port", "8501"]
+    )
     exit_code = cli.run(namespace)
 
     assert exit_code == 0
@@ -1478,12 +1585,213 @@ def test_run_no_remote_no_browser_does_not_open_local_url(
     )
 
     namespace = cli.parse_args(
-        [str(app_path), "--https", "self-signed", "--no-remote", "--no-browser"]
+        [
+            str(app_path),
+            "--https",
+            "self-signed",
+            "--no-remote",
+            "--no-browser",
+            "--port",
+            "8501",
+        ]
     )
     exit_code = cli.run(namespace)
 
     assert exit_code == 0
     assert opened == []
+
+
+def make_fake_display(**overrides: object) -> SimpleNamespace:
+    attrs: dict[str, object] = {
+        "start": lambda: None,
+        "stop": lambda: None,
+        "switch_to_plain": lambda: False,
+        "switch_to_rich": lambda: False,
+        "toggle_display": lambda: False,
+        "report_process_exit": lambda source, returncode: None,
+        "set_local_url": lambda url: None,
+        "set_remote_url": lambda url: None,
+        "set_status": lambda component, status: None,
+        "set_shortcuts_visible": lambda visible: None,
+        "scroll_log_up": lambda: False,
+        "scroll_log_down": lambda: False,
+        "reset_log_scroll": lambda: False,
+        "info": lambda message: None,
+        "error": lambda message: None,
+        "log": lambda source, line: None,
+        "streamlit_subprocess_columns": lambda: None,
+    }
+    attrs.update(overrides)
+    return SimpleNamespace(**attrs)
+
+
+def test_run_uses_streamlit_reported_port_for_tunnel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    started_processes: list[dict[str, object]] = []
+    local_urls: list[str] = []
+    listened: list[tuple[str, int]] = []
+
+    display = make_fake_display(set_local_url=local_urls.append)
+
+    def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
+        started_processes.append({"command": command, "prefix": prefix, **kwargs})
+        on_line = kwargs.get("on_line")
+        if prefix == cli.STREAMLIT_SOURCE and callable(on_line):
+            on_line("  Local URL: http://localhost:8502")
+
+        return SimpleNamespace(
+            process=SimpleNamespace(
+                returncode=0,
+                poll=lambda: 0,
+                terminate=lambda: None,
+                wait=lambda timeout=None: 0,
+            ),
+            prefix=prefix,
+            output_thread=SimpleNamespace(join=lambda timeout=None: None),
+        )
+
+    def wait_for_port(host: str, port: int) -> bool:
+        listened.append((host, port))
+        return True
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: FakeProvider(name, True))
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: display)
+    monkeypatch.setattr(cli, "start_logged_process", start_process)
+    monkeypatch.setattr(cli, "wait_until_listening", wait_for_port)
+
+    namespace = cli.parse_args([str(app_path), "--provider", "cloudflare", "--no-browser"])
+    exit_code = cli.run(namespace)
+
+    assert exit_code == 0
+    assert started_processes[0]["prefix"] == cli.STREAMLIT_SOURCE
+    streamlit_command = cast(list[str], started_processes[0]["command"])
+    tunnel_command = cast(list[str], started_processes[1]["command"])
+    assert "--server.port" not in streamlit_command
+    assert tunnel_command == ["cloudflare", "tunnel", "http://localhost:8502"]
+    assert local_urls == ["http://localhost:8502"]
+    assert listened == [("localhost", 8502)]
+
+
+def test_run_reuses_streamlit_reported_port_for_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    streamlit_commands: list[list[str]] = []
+
+    def start_process(command: list[str], prefix: str, **kwargs: object) -> cli.ManagedProcess:
+        if prefix == cli.STREAMLIT_SOURCE:
+            streamlit_commands.append(command)
+            on_line = kwargs.get("on_line")
+            if callable(on_line):
+                on_line("  URL: http://localhost:8502")
+        return make_process_handle(prefix, poll_results=[None])
+
+    def supervise(
+        streamlit_handle: cli.ManagedProcess,
+        tunnel_handle: cli.ManagedProcess | None,
+        restart_requested: threading.Event,
+        restart_streamlit: object,
+        **kwargs: object,
+    ) -> int:
+        assert callable(restart_streamlit)
+        restart_streamlit(streamlit_handle)
+        return 0
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: FakeProvider(name, True))
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: make_fake_display())
+    monkeypatch.setattr(cli, "start_logged_process", start_process)
+    monkeypatch.setattr(cli, "wait_until_listening", lambda host, port: True)
+    monkeypatch.setattr(cli, "supervise_processes", supervise)
+
+    namespace = cli.parse_args([str(app_path), "--provider", "cloudflare", "--no-browser"])
+
+    assert cli.run(namespace) == 0
+    assert len(streamlit_commands) == 2
+    assert "--server.port" not in streamlit_commands[0]
+    assert streamlit_commands[1][streamlit_commands[1].index("--server.port") + 1] == "8502"
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected_message"),
+    [
+        (1, "Streamlit exited before reporting its local URL."),
+        (None, "Streamlit did not report its local URL within the timeout."),
+    ],
+)
+def test_run_maps_local_url_detection_failure_to_cli_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int | None,
+    expected_message: str,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    handle = make_process_handle("streamlit", returncode=returncode, poll_results=[returncode])
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "get_provider", lambda name, executable=None: FakeProvider(name, True))
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: make_fake_display())
+    monkeypatch.setattr(cli, "start_logged_process", lambda *args, **kwargs: handle)
+    monkeypatch.setattr(cli, "wait_for_streamlit_local_server", lambda *args, **kwargs: None)
+
+    namespace = cli.parse_args([str(app_path), "--provider", "cloudflare", "--no-browser"])
+
+    with pytest.raises(cli.CliError, match=expected_message):
+        cli.run(namespace)
+
+
+def test_run_no_remote_continues_when_local_url_is_not_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    messages: list[str] = []
+    wait_timeouts: list[float | None] = []
+
+    def wait_for_local_server(
+        handle: cli.ManagedProcess,
+        detected: queue.Queue[cli.LocalServerConfig],
+        *,
+        timeout: float | None = cli.STREAMLIT_LOCAL_URL_TIMEOUT,
+        interval: float = 0.05,
+    ) -> None:
+        wait_timeouts.append(timeout)
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "prepare_cli_https_material", lambda namespace: None)
+    monkeypatch.setattr(
+        cli,
+        "make_runtime_display",
+        lambda use_tui: make_fake_display(info=messages.append),
+    )
+    monkeypatch.setattr(
+        cli,
+        "start_logged_process",
+        lambda command, prefix, **kwargs: make_process_handle(prefix, poll_results=[None]),
+    )
+    monkeypatch.setattr(cli, "wait_for_streamlit_local_server", wait_for_local_server)
+    monkeypatch.setattr(cli, "supervise_processes", lambda *args, **kwargs: 0)
+
+    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser"])
+
+    assert cli.run(namespace) == 0
+    assert wait_timeouts == [cli.STREAMLIT_LOCAL_URL_NO_REMOTE_TIMEOUT]
+    assert messages[-1] == (
+        "Warning: Streamlit did not report its local URL; "
+        "browser opening and port-aware restart checks are disabled."
+    )
 
 
 def test_run_passes_display_columns_to_streamlit_process(
@@ -1494,25 +1802,7 @@ def test_run_passes_display_columns_to_streamlit_process(
     app_path.write_text("import streamlit as st\n", encoding="utf-8")
     started_processes: list[dict[str, object]] = []
 
-    display = SimpleNamespace(
-        start=lambda: None,
-        stop=lambda: None,
-        switch_to_plain=lambda: False,
-        switch_to_rich=lambda: False,
-        toggle_display=lambda: False,
-        report_process_exit=lambda source, returncode: None,
-        set_local_url=lambda url: None,
-        set_remote_url=lambda url: None,
-        set_status=lambda component, status: None,
-        set_shortcuts_visible=lambda visible: None,
-        scroll_log_up=lambda: False,
-        scroll_log_down=lambda: False,
-        reset_log_scroll=lambda: False,
-        info=lambda message: None,
-        error=lambda message: None,
-        log=lambda source, line: None,
-        streamlit_subprocess_columns=lambda: 33,
-    )
+    display = make_fake_display(streamlit_subprocess_columns=lambda: 33)
 
     def start_process(command: list[str], prefix: str, **kwargs: object) -> SimpleNamespace:
         started_processes.append({"command": command, "prefix": prefix, **kwargs})
@@ -1533,7 +1823,7 @@ def test_run_passes_display_columns_to_streamlit_process(
     monkeypatch.setattr(cli, "make_runtime_display", lambda use_tui: display)
     monkeypatch.setattr(cli, "start_logged_process", start_process)
 
-    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser"])
+    namespace = cli.parse_args([str(app_path), "--no-remote", "--no-browser", "--port", "8501"])
     exit_code = cli.run(namespace)
 
     assert exit_code == 0
