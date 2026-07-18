@@ -23,6 +23,10 @@ classifiers = [
 dependencies = [
     "cryptography>=42",
     "rich>=15.0.0",
+    # Invoked as a subprocess (`sys.executable -m streamlit run`), never imported,
+    # so it runs whatever Streamlit lives in the user's env. Kept a hard dep for
+    # out-of-box `pip install streamlit-remote` usability; keep the floor as loose
+    # as possible so it never fights the version the user's app is pinned to.
     "streamlit>=1.28",
 ]
 
