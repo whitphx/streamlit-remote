@@ -10,7 +10,7 @@ It supports Cloudflare Quick Tunnel, ngrok, zrok, Pinggy, localhost.run, and man
 pip install streamlit-remote
 ```
 
-This package requires Python 3.10 or newer.
+This package requires Python 3.11 or newer.
 
 ## Basic Usage
 

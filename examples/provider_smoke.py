@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import streamlit as st
 
@@ -12,7 +12,7 @@ if "click_count" not in st.session_state:
 st.title("Provider smoke test")
 st.write("Use this app to verify a tunnel provider with Streamlit's live connection.")
 
-rendered_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+rendered_at = datetime.now(UTC).isoformat(timespec="seconds")
 st.metric("Button clicks", st.session_state.click_count)
 st.caption(f"Rendered at {rendered_at}")
 

@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
@@ -85,7 +85,7 @@ def prepare_self_signed_material(
         return HttpsMaterial(cert_file=cert_file, key_file=key_file)
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(certificate_name())
@@ -292,14 +292,14 @@ def is_reusable_certificate(
         return False
 
     expires_at = certificate_not_valid_after(cert)
-    return expires_at > datetime.now(timezone.utc) + timedelta(days=1)
+    return expires_at > datetime.now(UTC) + timedelta(days=1)
 
 
 def certificate_not_valid_after(cert: x509.Certificate) -> datetime:
     expires_at = getattr(cert, "not_valid_after_utc", None)
     if expires_at is not None:
         return expires_at
-    return cert.not_valid_after.replace(tzinfo=timezone.utc)
+    return cert.not_valid_after.replace(tzinfo=UTC)
 
 
 def certificate_name() -> x509.Name:
