@@ -551,6 +551,9 @@ def run(namespace: argparse.Namespace) -> int:
         return next_handle
 
     def raise_termination_requested(signum: int, frame: object) -> None:
+        # Ignoring further signals here rather than in the finally block
+        # keeps a second SIGTERM from interrupting the except clause.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         raise TerminationRequested
 
     previous_sigterm_handler = signal.signal(signal.SIGTERM, raise_termination_requested)
@@ -675,7 +678,7 @@ def run(namespace: argparse.Namespace) -> int:
         display.error("Terminated. Shutting down child processes...")
         return 128 + signal.SIGTERM
     finally:
-        # A repeated SIGTERM would otherwise abort the shutdown below
+        # A SIGTERM during the shutdown below would abort it
         # and orphan the children again. The shutdown is bounded by
         # the terminate and kill timeouts, and SIGKILL still works.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
