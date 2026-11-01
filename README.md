@@ -80,7 +80,7 @@ Press `t` to toggle between the live terminal display and plain prefixed log out
 
 If Streamlit or the remote tunnel exits with an error while the live terminal display is active, `st-remote` returns to the normal terminal buffer and replays recent logs before exiting.
 
-Use Ctrl+C to stop both Streamlit and the remote tunnel.
+Use Ctrl+C to stop both Streamlit and the remote tunnel. `SIGTERM`, as sent by `kill` or a process manager, stops them the same way.
 
 ## Local HTTPS
 

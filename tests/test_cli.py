@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import signal
 import termios
 import threading
 import time
@@ -1555,6 +1556,56 @@ def test_run_no_remote_opens_local_https_url(
 
     assert exit_code == 0
     assert opened == ["https://localhost:8501"]
+
+
+def test_run_stops_child_processes_on_sigterm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_path = tmp_path / "app.py"
+    app_path.write_text("import streamlit as st\n", encoding="utf-8")
+    terminated = threading.Event()
+
+    monkeypatch.setattr(cli, "require_streamlit", lambda: None)
+    monkeypatch.setattr(cli, "is_port_available", lambda host, port: True)
+    monkeypatch.setattr(
+        cli,
+        "start_logged_process",
+        lambda command, prefix, **kwargs: SimpleNamespace(
+            process=SimpleNamespace(
+                returncode=None,
+                poll=lambda: 0 if terminated.is_set() else None,
+                terminate=terminated.set,
+                wait=lambda timeout=None: 0,
+            ),
+            prefix=prefix,
+            output_thread=SimpleNamespace(join=lambda timeout=None: None),
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "supervise_processes",
+        lambda *args, **kwargs: signal.raise_signal(signal.SIGTERM),
+    )
+
+    def outer_handler(signum: int, frame: object) -> None:
+        pass
+
+    # Without this handler, a regression would kill the test runner
+    # through the default SIGTERM action.
+    original_handler = signal.signal(signal.SIGTERM, outer_handler)
+    try:
+        namespace = cli.parse_args(
+            [str(app_path), "--no-remote", "--no-browser", "--no-tui", "--port", "8501"]
+        )
+        exit_code = cli.run(namespace)
+        handler_after_run = signal.getsignal(signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, original_handler)
+
+    assert exit_code == 128 + signal.SIGTERM
+    assert terminated.is_set()
+    assert handler_after_run is outer_handler
 
 
 def test_run_no_remote_no_browser_does_not_open_local_url(

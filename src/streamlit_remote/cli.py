@@ -8,6 +8,7 @@ import queue
 import re
 import select
 import shlex
+import signal
 import sys
 import threading
 import time
@@ -549,6 +550,10 @@ def run(namespace: argparse.Namespace) -> int:
             display.set_status("Streamlit", "running")
         return next_handle
 
+    def raise_termination_requested(signum: int, frame: object) -> None:
+        raise TerminationRequested
+
+    previous_sigterm_handler = signal.signal(signal.SIGTERM, raise_termination_requested)
     try:
         streamlit_handle = start_streamlit_process()
         if local_server is None:
@@ -666,7 +671,14 @@ def run(namespace: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         display.error("Interrupted. Shutting down child processes...")
         return 130
+    except TerminationRequested:
+        display.error("Terminated. Shutting down child processes...")
+        return 128 + signal.SIGTERM
     finally:
+        # A repeated SIGTERM would otherwise abort the shutdown below
+        # and orphan the children again. The shutdown is bounded by
+        # the terminate and kill timeouts, and SIGKILL still works.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         shortcut_stop_requested.set()
         remote_url_printed.set()
         handles = [handle for handle in (streamlit_handle, tunnel_handle) if handle is not None]
@@ -676,6 +688,7 @@ def run(namespace: argparse.Namespace) -> int:
         if traffic_policy is not None:
             traffic_policy.cleanup()
         display.stop()
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
 
 def main() -> None:
@@ -683,6 +696,10 @@ def main() -> None:
 
 
 class CliError(Exception):
+    pass
+
+
+class TerminationRequested(Exception):
     pass
 
 
