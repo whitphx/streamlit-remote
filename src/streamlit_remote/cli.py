@@ -532,10 +532,14 @@ def run(namespace: argparse.Namespace) -> int:
         )
 
     def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
+        nonlocal streamlit_handle
         display.set_status("Streamlit", "restarting")
         display.info("Restarting Streamlit...")
         terminate_processes([current_handle])
         next_handle = start_streamlit_process()
+        # Tracking the new handle before waiting for it to listen
+        # lets a shutdown during the wait terminate it.
+        streamlit_handle = next_handle
         current_local_server = local_server
         if current_local_server is None:
             display.set_status("Streamlit", "running")
@@ -650,11 +654,6 @@ def run(namespace: argparse.Namespace) -> int:
         if shortcut_thread is not None:
             display.set_shortcuts_visible(True)
 
-        def restart_and_track(current_handle: ManagedProcess) -> ManagedProcess:
-            nonlocal streamlit_handle
-            streamlit_handle = restart_streamlit_process(current_handle)
-            return streamlit_handle
-
         def report_process_error(handle: ManagedProcess, returncode: int) -> None:
             display.report_process_exit(handle.prefix, returncode)
 
@@ -662,7 +661,7 @@ def run(namespace: argparse.Namespace) -> int:
             streamlit_handle,
             tunnel_handle,
             restart_requested,
-            restart_and_track,
+            restart_streamlit_process,
             report_process_error=report_process_error,
             display_toggle_requested=display_toggle_requested,
             toggle_display=display.toggle_display,
@@ -672,6 +671,8 @@ def run(namespace: argparse.Namespace) -> int:
             switch_to_rich=display.switch_to_rich,
         )
     except KeyboardInterrupt:
+        # A SIGTERM here would escape this except clause uncaught.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         display.error("Interrupted. Shutting down child processes...")
         return 130
     except TerminationRequested:
