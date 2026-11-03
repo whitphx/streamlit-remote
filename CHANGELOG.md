@@ -2,6 +2,17 @@
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-0.12.0'></a>
+## 0.12.0 — 2026-11-03
+
+### Changed
+
+- Dropped support for Python 3.10, which has reached end of life. Python 3.11 or newer is now required.
+
+### Fixed
+
+- `st-remote` now stops its Streamlit and tunnel child processes when it receives `SIGTERM`, instead of exiting immediately and leaving them running.
+
 <a id='changelog-0.11.0'></a>
 ## 0.11.0 — 2026-07-12
 
