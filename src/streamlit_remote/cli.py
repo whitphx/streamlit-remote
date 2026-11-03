@@ -8,6 +8,7 @@ import queue
 import re
 import select
 import shlex
+import signal
 import sys
 import threading
 import time
@@ -531,10 +532,14 @@ def run(namespace: argparse.Namespace) -> int:
         )
 
     def restart_streamlit_process(current_handle: ManagedProcess) -> ManagedProcess:
+        nonlocal streamlit_handle
         display.set_status("Streamlit", "restarting")
         display.info("Restarting Streamlit...")
         terminate_processes([current_handle])
         next_handle = start_streamlit_process()
+        # Tracking the new handle before waiting for it to listen
+        # lets a shutdown during the wait terminate it.
+        streamlit_handle = next_handle
         current_local_server = local_server
         if current_local_server is None:
             display.set_status("Streamlit", "running")
@@ -549,6 +554,13 @@ def run(namespace: argparse.Namespace) -> int:
             display.set_status("Streamlit", "running")
         return next_handle
 
+    def raise_termination_requested(signum: int, frame: object) -> None:
+        # Ignoring further signals here rather than in the finally block
+        # keeps a second SIGTERM from interrupting the except clause.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise TerminationRequested
+
+    previous_sigterm_handler = signal.signal(signal.SIGTERM, raise_termination_requested)
     try:
         streamlit_handle = start_streamlit_process()
         if local_server is None:
@@ -642,11 +654,6 @@ def run(namespace: argparse.Namespace) -> int:
         if shortcut_thread is not None:
             display.set_shortcuts_visible(True)
 
-        def restart_and_track(current_handle: ManagedProcess) -> ManagedProcess:
-            nonlocal streamlit_handle
-            streamlit_handle = restart_streamlit_process(current_handle)
-            return streamlit_handle
-
         def report_process_error(handle: ManagedProcess, returncode: int) -> None:
             display.report_process_exit(handle.prefix, returncode)
 
@@ -654,7 +661,7 @@ def run(namespace: argparse.Namespace) -> int:
             streamlit_handle,
             tunnel_handle,
             restart_requested,
-            restart_and_track,
+            restart_streamlit_process,
             report_process_error=report_process_error,
             display_toggle_requested=display_toggle_requested,
             toggle_display=display.toggle_display,
@@ -664,9 +671,18 @@ def run(namespace: argparse.Namespace) -> int:
             switch_to_rich=display.switch_to_rich,
         )
     except KeyboardInterrupt:
+        # A SIGTERM here would escape this except clause uncaught.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         display.error("Interrupted. Shutting down child processes...")
         return 130
+    except TerminationRequested:
+        display.error("Terminated. Shutting down child processes...")
+        return 128 + signal.SIGTERM
     finally:
+        # A SIGTERM during the shutdown below would abort it
+        # and orphan the children again. The shutdown is bounded by
+        # the terminate and kill timeouts, and SIGKILL still works.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         shortcut_stop_requested.set()
         remote_url_printed.set()
         handles = [handle for handle in (streamlit_handle, tunnel_handle) if handle is not None]
@@ -676,6 +692,7 @@ def run(namespace: argparse.Namespace) -> int:
         if traffic_policy is not None:
             traffic_policy.cleanup()
         display.stop()
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
 
 def main() -> None:
@@ -683,6 +700,10 @@ def main() -> None:
 
 
 class CliError(Exception):
+    pass
+
+
+class TerminationRequested(Exception):
     pass
 
 

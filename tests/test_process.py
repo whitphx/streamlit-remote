@@ -34,6 +34,33 @@ def test_start_logged_process_merges_environment_overrides(
     assert captured["kwargs"]["env"]["COLUMNS"] == "24"
 
 
+def test_start_logged_process_kills_child_when_interrupted_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    killed: list[bool] = []
+
+    class FakePopen:
+        def __init__(self, command: list[str], **kwargs: Any) -> None:
+            self.stdout = StringIO()
+
+        def kill(self) -> None:
+            killed.append(True)
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt(self: object) -> None:
+        raise Interrupted
+
+    monkeypatch.setattr(process.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(process.threading.Thread, "start", interrupt)
+
+    with pytest.raises(Interrupted):
+        process.start_logged_process(["streamlit"], "streamlit")
+
+    assert killed == [True]
+
+
 def test_iter_output_lines_splits_on_carriage_return() -> None:
     output = StringIO("first\rsecond\nthird\r\nfourth")
 
