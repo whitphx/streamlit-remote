@@ -73,7 +73,13 @@ def start_logged_process(
         name=f"streamlit-remote-{prefix}",
         daemon=True,
     )
-    output_thread.start()
+    try:
+        output_thread.start()
+    except BaseException:
+        # The caller can only clean up a child it got a handle for,
+        # so an interrupt such as SIGTERM here would orphan it.
+        process.kill()
+        raise
     return ManagedProcess(process=process, prefix=prefix, output_thread=output_thread)
 
 
